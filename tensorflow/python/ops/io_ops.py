@@ -82,6 +82,12 @@ Queues](../../how_tos/threading_and_queues/index.md).
 @@RandomShuffleQueue
 @@PriorityQueue
 
+## Conditional Accumulators
+
+@@ConditionalAccumulatorBase
+@@ConditionalAccumulator
+@@SparseConditionalAccumulator
+
 ## Dealing with the filesystem
 
 @@matching_files
@@ -210,6 +216,10 @@ ops.RegisterShape("Save")(common_shapes.call_cpp_shape_fn)
 ops.RegisterShape("SaveSlices")(common_shapes.call_cpp_shape_fn)
 ops.RegisterShape("ShardedFilename")(common_shapes.call_cpp_shape_fn)
 ops.RegisterShape("ShardedFilespec")(common_shapes.call_cpp_shape_fn)
+
+ops.RegisterShape("SaveV2")(common_shapes.call_cpp_shape_fn)
+ops.RegisterShape("RestoreV2")(common_shapes.call_cpp_shape_fn)
+ops.RegisterShape("MergeV2Checkpoints")(common_shapes.call_cpp_shape_fn)
 
 
 class ReaderBase(object):
@@ -464,13 +474,11 @@ class TFRecordReader(ReaderBase):
       name: A name for the operation (optional).
       options: A TFRecordOptions object (optional).
     """
-    compression_type_string = ""
-    if (options and
-        options.compression_type == python_io.TFRecordCompressionType.ZLIB):
-      compression_type_string = "ZLIB"
+    compression_type = python_io.TFRecordOptions.get_compression_type_string(
+        options)
 
-    rr = gen_io_ops._tf_record_reader(name=name,
-                                      compression_type=compression_type_string)
+    rr = gen_io_ops._tf_record_reader(
+        name=name, compression_type=compression_type)
     super(TFRecordReader, self).__init__(rr)
 
 

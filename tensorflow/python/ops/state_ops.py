@@ -25,6 +25,7 @@ collected in the graph.
 @@all_variables
 @@trainable_variables
 @@local_variables
+@@model_variables
 @@moving_average_variables
 
 @@initialize_all_variables
@@ -33,6 +34,10 @@ collected in the graph.
 @@is_variable_initialized
 @@report_uninitialized_variables
 @@assert_variables_initialized
+
+@@assign
+@@assign_add
+@@assign_sub
 
 ## Saving and Restoring Variables
 
@@ -92,6 +97,10 @@ automatically by the optimizers in most cases.
 @@scatter_div
 @@sparse_mask
 @@IndexedSlices
+
+### Read-only Lookup Tables
+
+@@initialize_all_tables
 
 
 ## Exporting and Importing Meta Graphs

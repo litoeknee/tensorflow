@@ -72,7 +72,7 @@ protocol buffer file in the call to `save()`.
 
 - - -
 
-#### `tf.train.Saver.__init__(var_list=None, reshape=False, sharded=False, max_to_keep=5, keep_checkpoint_every_n_hours=10000.0, name=None, restore_sequentially=False, saver_def=None, builder=None, defer_build=False, allow_empty=False)` {#Saver.__init__}
+#### `tf.train.Saver.__init__(var_list=None, reshape=False, sharded=False, max_to_keep=5, keep_checkpoint_every_n_hours=10000.0, name=None, restore_sequentially=False, saver_def=None, builder=None, defer_build=False, allow_empty=False, write_version=1, pad_step_number=False)` {#Saver.__init__}
 
 Creates a `Saver`.
 
@@ -140,6 +140,14 @@ checkpoints per device.
 *  <b>`allow_empty`</b>: If `False` (default) raise an error if there are no
     variables in the graph. Otherwise, construct the saver anyway and make
     it a no-op.
+*  <b>`write_version`</b>: controls what format to use when saving checkpoints.  It
+    also affects certain filepath matching logic.  Defaults to V1
+    currently, and will be switched to the more memory-efficient V2 format
+    in the future.  If set to V2, the Saver is still able to restore from
+    old V1 checkpoints.
+*  <b>`pad_step_number`</b>: if True, pads the global step number in the checkpoint
+    filepaths to some fixed width (8 by default).  This is turned off by
+    default.
 
 ##### Raises:
 
@@ -218,7 +226,8 @@ The `save_path` argument is typically a value previously returned from a
 ##### Raises:
 
 
-*  <b>`ValueError`</b>: If the given `save_path` does not point to a file.
+*  <b>`ValueError`</b>: DEPRECATED, do not rely on this Error.  If the given
+    `save_path` does not point to a file.
 
 
 

@@ -24,6 +24,7 @@ import time
 from tensorflow.core.framework.summary_pb2 import Summary
 from tensorflow.core.util.event_pb2 import SessionLog
 from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import meta_graph
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import data_flow_ops
@@ -276,7 +277,7 @@ class Supervisor(object):
       global_step: An integer Tensor of size 1 that counts steps.  The value
         from 'global_step' is used in summaries and checkpoint filenames.
         Default to the op named 'global_step' in the graph if it exists, is of
-        rank 1, size 1, and of type tf.int32 ot tf.int64.  If `None` the global
+        rank 1, size 1, and of type tf.int32 or tf.int64.  If `None` the global
         step is not recorded in summaries and checkpoint files.  Used by chief
         supervisors if a `logdir` was specified.
       save_summaries_secs: Number of seconds between the computation of
@@ -314,6 +315,9 @@ class Supervisor(object):
       self._init_summary_op(summary_op=summary_op)
       self._init_global_step(global_step=global_step)
     self._graph = graph
+    self._meta_graph_def = meta_graph.create_meta_graph_def(
+        graph_def=graph.as_graph_def(add_shapes=True),
+        saver_def=self._saver.saver_def if self._saver else None)
     self._is_chief = is_chief
     self._coord = coordinator.Coordinator()
     self._recovery_wait_secs = recovery_wait_secs
@@ -620,6 +624,7 @@ class Supervisor(object):
                                 self._logdir, "graph.pbtxt")
     if self._summary_writer and not self._graph_added_to_summary:
       self._summary_writer.add_graph(self._graph)
+      self._summary_writer.add_meta_graph(self._meta_graph_def)
       self._graph_added_to_summary = True
 
   def start_standard_services(self, sess):

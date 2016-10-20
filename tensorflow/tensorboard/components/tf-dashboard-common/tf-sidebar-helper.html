@@ -28,6 +28,7 @@ To use it, create the tf-sidebar-helper with the required properties. To extend
 it with extra configuration components, add them to the element's component:
 
 <tf-sidebar-helper
+  backend: "[[backend]]",
   categories: "{{outputCategories}}",
   colorScale: "[[colorScale]]",
   run2tag: "[[run2tag]]",
@@ -54,7 +55,7 @@ tf-run-selector.
     <div class="sidebar-section">
       <tf-categorizer
         id="categorizer"
-        tags="[[_visibleTags]]"
+        tags="[[tags]]"
         categories="{{categories}}"
         ></tf-categorizer>
       <content select=".extend-first-section"></content>
@@ -63,6 +64,7 @@ tf-run-selector.
     <div class="sidebar-section">
       <tf-run-selector
         id="runSelector"
+        backend="[[backend]]"
         runs="[[runs]]"
         color-scale="[[colorScale]]"
         out-selected="{{selectedRuns}}"
@@ -111,6 +113,11 @@ tf-run-selector.
       is: "tf-sidebar-helper",
       properties: {
         /**
+         * The backend object used to issue requests.
+         */
+        backend: Object,
+
+        /**
          * This is an output of the categories that the user selected to
          * separate the different tags. Each category here should be given its
          * own collapsible pane.
@@ -144,15 +151,13 @@ tf-run-selector.
           notify: true,
         },
 
-        _visibleTags: {
+        tags: {
           type: Array,
-          computed: "_getVisibleTags(selectedRuns.*, run2tag.*)"
+          computed: "_getTags(run2tag.*)"
         },
       },
-      _getVisibleTags: function() {
-        var keys = this.selectedRuns;
-        var dict = this.run2tag;
-        return _.union.apply(null, keys.map(function(k) {return dict[k]}));
+      _getTags: function() {
+        return _.union.apply(null, _.values(this.run2tag));
       },
     })
   </script>

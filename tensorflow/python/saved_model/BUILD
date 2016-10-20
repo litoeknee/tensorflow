@@ -2,10 +2,7 @@
 # TensorFlow SavedModel.
 
 package(
-    default_visibility = ["//visibility:private"],
-    features = [
-        "-layering_check",
-    ],
+    default_visibility = ["//tensorflow/python/saved_model:__subpackages__"],
 )
 
 licenses(["notice"])  # Apache 2.0
@@ -19,12 +16,17 @@ py_library(
 )
 
 py_library(
+    name = "signature_constants",
+    srcs = ["signature_constants.py"],
+    srcs_version = "PY2AND3",
+)
+
+py_library(
     name = "builder",
     srcs = ["builder.py"],
     srcs_version = "PY2AND3",
     deps = [
         "//tensorflow:tensorflow_py",
-        "//tensorflow/contrib/session_bundle:manifest_proto_py",
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:platform",
@@ -59,7 +61,6 @@ py_test(
         ":loader",
         ":utils",
         "//tensorflow:tensorflow_py",
-        "//tensorflow/contrib/session_bundle:manifest_proto_py",
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:framework",
         "//tensorflow/python:framework_for_generated_wrappers",

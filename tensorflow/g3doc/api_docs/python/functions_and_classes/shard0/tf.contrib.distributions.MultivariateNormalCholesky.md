@@ -42,7 +42,7 @@ x = [[-1, 0, 1], [-11, 0, 11]]  # Shape 2 x 3.
 dist.pdf(x)
 ```
 
-Trainable (batch) Choesky matrices can be created with
+Trainable (batch) Cholesky matrices can be created with
 `tf.contrib.distributions.matrix_diag_transform()`
 - - -
 
@@ -119,7 +119,7 @@ independent distributions of this kind the instance represents.
 
 - - -
 
-#### `tf.contrib.distributions.MultivariateNormalCholesky.cdf(value, name='cdf')` {#MultivariateNormalCholesky.cdf}
+#### `tf.contrib.distributions.MultivariateNormalCholesky.cdf(value, name='cdf', **condition_kwargs)` {#MultivariateNormalCholesky.cdf}
 
 Cumulative distribution function.
 
@@ -134,6 +134,7 @@ cdf(x) := P[X <= x]
 
 *  <b>`value`</b>: `float` or `double` `Tensor`.
 *  <b>`name`</b>: The name to give this op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
 
 ##### Returns:
 
@@ -153,7 +154,7 @@ The `DType` of `Tensor`s handled by this `Distribution`.
 
 #### `tf.contrib.distributions.MultivariateNormalCholesky.entropy(name='entropy')` {#MultivariateNormalCholesky.entropy}
 
-Shanon entropy in nats.
+Shannon entropy in nats.
 
 
 - - -
@@ -217,7 +218,7 @@ Same meaning as `event_shape`. May be only partially defined.
 
 - - -
 
-#### `tf.contrib.distributions.MultivariateNormalCholesky.log_cdf(value, name='log_cdf')` {#MultivariateNormalCholesky.log_cdf}
+#### `tf.contrib.distributions.MultivariateNormalCholesky.log_cdf(value, name='log_cdf', **condition_kwargs)` {#MultivariateNormalCholesky.log_cdf}
 
 Log cumulative distribution function.
 
@@ -236,6 +237,7 @@ a more accurate answer than simply taking the logarithm of the `cdf` when
 
 *  <b>`value`</b>: `float` or `double` `Tensor`.
 *  <b>`name`</b>: The name to give this op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
 
 ##### Returns:
 
@@ -246,7 +248,7 @@ a more accurate answer than simply taking the logarithm of the `cdf` when
 
 - - -
 
-#### `tf.contrib.distributions.MultivariateNormalCholesky.log_pdf(value, name='log_pdf')` {#MultivariateNormalCholesky.log_pdf}
+#### `tf.contrib.distributions.MultivariateNormalCholesky.log_pdf(value, name='log_pdf', **condition_kwargs)` {#MultivariateNormalCholesky.log_pdf}
 
 Log probability density function.
 
@@ -255,6 +257,7 @@ Log probability density function.
 
 *  <b>`value`</b>: `float` or `double` `Tensor`.
 *  <b>`name`</b>: The name to give this op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
 
 ##### Returns:
 
@@ -265,12 +268,12 @@ Log probability density function.
 ##### Raises:
 
 
-*  <b>`AttributeError`</b>: if not `is_continuous`.
+*  <b>`TypeError`</b>: if not `is_continuous`.
 
 
 - - -
 
-#### `tf.contrib.distributions.MultivariateNormalCholesky.log_pmf(value, name='log_pmf')` {#MultivariateNormalCholesky.log_pmf}
+#### `tf.contrib.distributions.MultivariateNormalCholesky.log_pmf(value, name='log_pmf', **condition_kwargs)` {#MultivariateNormalCholesky.log_pmf}
 
 Log probability mass function.
 
@@ -279,6 +282,7 @@ Log probability mass function.
 
 *  <b>`value`</b>: `float` or `double` `Tensor`.
 *  <b>`name`</b>: The name to give this op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
 
 ##### Returns:
 
@@ -289,20 +293,37 @@ Log probability mass function.
 ##### Raises:
 
 
-*  <b>`AttributeError`</b>: if `is_continuous`.
+*  <b>`TypeError`</b>: if `is_continuous`.
 
 
 - - -
 
-#### `tf.contrib.distributions.MultivariateNormalCholesky.log_prob(value, name='log_prob')` {#MultivariateNormalCholesky.log_prob}
+#### `tf.contrib.distributions.MultivariateNormalCholesky.log_prob(value, name='log_prob', **condition_kwargs)` {#MultivariateNormalCholesky.log_prob}
 
 Log probability density/mass function (depending on `is_continuous`).
+
+
+Additional documentation from `_MultivariateNormalOperatorPD`:
+
+`x` is a batch vector with compatible shape if `x` is a `Tensor` whose
+shape can be broadcast up to either:
+
+```
+self.batch_shape + self.event_shape
+```
+
+or
+
+```
+[M1,...,Mm] + self.batch_shape + self.event_shape
+```
 
 ##### Args:
 
 
 *  <b>`value`</b>: `float` or `double` `Tensor`.
 *  <b>`name`</b>: The name to give this op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
 
 ##### Returns:
 
@@ -320,7 +341,7 @@ Log of determinant of covariance matrix.
 
 - - -
 
-#### `tf.contrib.distributions.MultivariateNormalCholesky.log_survival_function(value, name='log_survival_function')` {#MultivariateNormalCholesky.log_survival_function}
+#### `tf.contrib.distributions.MultivariateNormalCholesky.log_survival_function(value, name='log_survival_function', **condition_kwargs)` {#MultivariateNormalCholesky.log_survival_function}
 
 Log survival function.
 
@@ -340,6 +361,7 @@ survival function, which are more accurate than `1 - cdf(x)` when `x >> 1`.
 
 *  <b>`value`</b>: `float` or `double` `Tensor`.
 *  <b>`name`</b>: The name to give this op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
 
 ##### Returns:
 
@@ -426,7 +448,7 @@ Dictionary of parameters used by this `Distribution`.
 
 - - -
 
-#### `tf.contrib.distributions.MultivariateNormalCholesky.pdf(value, name='pdf')` {#MultivariateNormalCholesky.pdf}
+#### `tf.contrib.distributions.MultivariateNormalCholesky.pdf(value, name='pdf', **condition_kwargs)` {#MultivariateNormalCholesky.pdf}
 
 Probability density function.
 
@@ -435,6 +457,7 @@ Probability density function.
 
 *  <b>`value`</b>: `float` or `double` `Tensor`.
 *  <b>`name`</b>: The name to give this op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
 
 ##### Returns:
 
@@ -445,12 +468,12 @@ Probability density function.
 ##### Raises:
 
 
-*  <b>`AttributeError`</b>: if not `is_continuous`.
+*  <b>`TypeError`</b>: if not `is_continuous`.
 
 
 - - -
 
-#### `tf.contrib.distributions.MultivariateNormalCholesky.pmf(value, name='pmf')` {#MultivariateNormalCholesky.pmf}
+#### `tf.contrib.distributions.MultivariateNormalCholesky.pmf(value, name='pmf', **condition_kwargs)` {#MultivariateNormalCholesky.pmf}
 
 Probability mass function.
 
@@ -459,6 +482,7 @@ Probability mass function.
 
 *  <b>`value`</b>: `float` or `double` `Tensor`.
 *  <b>`name`</b>: The name to give this op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
 
 ##### Returns:
 
@@ -469,20 +493,37 @@ Probability mass function.
 ##### Raises:
 
 
-*  <b>`AttributeError`</b>: if `is_continuous`.
+*  <b>`TypeError`</b>: if `is_continuous`.
 
 
 - - -
 
-#### `tf.contrib.distributions.MultivariateNormalCholesky.prob(value, name='prob')` {#MultivariateNormalCholesky.prob}
+#### `tf.contrib.distributions.MultivariateNormalCholesky.prob(value, name='prob', **condition_kwargs)` {#MultivariateNormalCholesky.prob}
 
 Probability density/mass function (depending on `is_continuous`).
+
+
+Additional documentation from `_MultivariateNormalOperatorPD`:
+
+`x` is a batch vector with compatible shape if `x` is a `Tensor` whose
+shape can be broadcast up to either:
+
+```
+self.batch_shape + self.event_shape
+```
+
+or
+
+```
+[M1,...,Mm] + self.batch_shape + self.event_shape
+```
 
 ##### Args:
 
 
 *  <b>`value`</b>: `float` or `double` `Tensor`.
 *  <b>`name`</b>: The name to give this op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
 
 ##### Returns:
 
@@ -493,7 +534,7 @@ Probability density/mass function (depending on `is_continuous`).
 
 - - -
 
-#### `tf.contrib.distributions.MultivariateNormalCholesky.sample(sample_shape=(), seed=None, name='sample')` {#MultivariateNormalCholesky.sample}
+#### `tf.contrib.distributions.MultivariateNormalCholesky.sample(sample_shape=(), seed=None, name='sample', **condition_kwargs)` {#MultivariateNormalCholesky.sample}
 
 Generate samples of the specified shape.
 
@@ -506,6 +547,7 @@ sample.
 *  <b>`sample_shape`</b>: 0D or 1D `int32` `Tensor`. Shape of the generated samples.
 *  <b>`seed`</b>: Python integer seed for RNG
 *  <b>`name`</b>: name to give to the op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
 
 ##### Returns:
 
@@ -515,7 +557,7 @@ sample.
 
 - - -
 
-#### `tf.contrib.distributions.MultivariateNormalCholesky.sample_n(n, seed=None, name='sample_n')` {#MultivariateNormalCholesky.sample_n}
+#### `tf.contrib.distributions.MultivariateNormalCholesky.sample_n(n, seed=None, name='sample_n', **condition_kwargs)` {#MultivariateNormalCholesky.sample_n}
 
 Generate `n` samples.
 
@@ -526,6 +568,7 @@ Generate `n` samples.
     observations to sample.
 *  <b>`seed`</b>: Python integer seed for RNG
 *  <b>`name`</b>: name to give to the op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
 
 ##### Returns:
 
@@ -561,7 +604,7 @@ Standard deviation.
 
 - - -
 
-#### `tf.contrib.distributions.MultivariateNormalCholesky.survival_function(value, name='survival_function')` {#MultivariateNormalCholesky.survival_function}
+#### `tf.contrib.distributions.MultivariateNormalCholesky.survival_function(value, name='survival_function', **condition_kwargs)` {#MultivariateNormalCholesky.survival_function}
 
 Survival function.
 
@@ -578,6 +621,7 @@ survival_function(x) = P[X > x]
 
 *  <b>`value`</b>: `float` or `double` `Tensor`.
 *  <b>`name`</b>: The name to give this op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
 
 ##### Returns:
 

@@ -9,8 +9,15 @@ Constructs an Estimator instance.
 
 
 *  <b>`model_fn`</b>: Model function, takes features and targets tensors or dicts of
-            tensors and returns predictions and loss tensors.
-            Supports next three signatures for the function:
+            tensors and returns tuple of:
+
+      * predictions: `Tensor`, `SparseTensor` or dictionary of same.
+          Can also be any type that is convertible to a `Tensor` or
+          `SparseTensor`, or dictionary of same.
+      * loss: Scalar loss `Tensor`.
+      * train_op: Training update `Tensor` or `Operation`.
+
+     Supports next three signatures for the function:
 
       * `(features, targets) -> (predictions, loss, train_op)`
       * `(features, targets, mode) -> (predictions, loss, train_op)`
@@ -86,7 +93,7 @@ Exports inference graph into given dir. (deprecated arguments)
 
 SOME ARGUMENTS ARE DEPRECATED. They will be removed after 2016-09-23.
 Instructions for updating:
-The signature of the input_fn accepted by export is changing to be consistent with what's used by tf.Learn Estimator's train/evaluate. input_fn and input_feature_key will become required args, and use_deprecated_input_fn will default to False and be removed altogether.
+The signature of the input_fn accepted by export is changing to be consistent with what's used by tf.Learn Estimator's train/evaluate. input_fn (and in most cases, input_feature_key) will become required args, and use_deprecated_input_fn will default to False and be removed altogether.
 
     Args:
       export_dir: A string containing a directory to write the exported graph
@@ -98,9 +105,10 @@ The signature of the input_fn accepted by export is changing to be consistent wi
         string key to `Tensor` and targets is a `Tensor` that's currently not
         used (and so can be `None`).
       input_feature_key: Only used if `use_deprecated_input_fn` is false. String
-        key into the features dict returned by `input_fn` that corresponds to
+        key into the features dict returned by `input_fn` that corresponds to a
         the raw `Example` strings `Tensor` that the exported model will take as
-        input.
+        input. Can only be `None` if you're using a custom `signature_fn` that
+        does not use the first arg (examples).
       use_deprecated_input_fn: Determines the signature format of `input_fn`.
       signature_fn: Function that returns a default signature and a named
         signature map, given `Tensor` of `Example` strings, `dict` of `Tensor`s
@@ -111,6 +119,12 @@ The signature of the input_fn accepted by export is changing to be consistent wi
         `signature_fn` without filtering.
       default_batch_size: Default batch size of the `Example` placeholder.
       exports_to_keep: Number of exports to keep.
+
+    Returns:
+      The string path to the exported directory. NB: this functionality was
+      added ca. 2016/09/25; clients that depend on the return value may need
+      to handle the case where this function returns None because subclasses
+      are not returning a value.
 
 
 - - -

@@ -24,6 +24,9 @@ limitations under the License.
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/types.h"
 
+// TODO(mrry): Prevent this Windows.h #define from leaking out of our headers.
+#undef ERROR
+
 namespace tensorflow {
 const int INFO = 0;            // base_logging::INFO;
 const int WARNING = 1;         // base_logging::WARNING;
@@ -52,7 +55,7 @@ class LogMessage : public std::basic_ostringstream<char> {
 class LogMessageFatal : public LogMessage {
  public:
   LogMessageFatal(const char* file, int line) TF_ATTRIBUTE_COLD;
-  ~LogMessageFatal() TF_ATTRIBUTE_NORETURN;
+  TF_ATTRIBUTE_NORETURN ~LogMessageFatal();
 };
 
 #define _TF_LOG_INFO \

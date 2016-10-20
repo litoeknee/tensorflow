@@ -27,6 +27,7 @@ limitations under the License.
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/graph/graph.h"
+#include "tensorflow/core/graph/graph_constructor.h"
 #include "tensorflow/core/graph/node_builder.h"
 #include "tensorflow/core/lib/core/coding.h"
 #include "tensorflow/core/lib/core/errors.h"
@@ -1227,10 +1228,10 @@ int TF_OperationGetControlOutputs(TF_Operation* oper,
   return count;
 }
 
-TF_Attr_Metadata TF_OperationGetAttrMetadata(TF_Operation* oper,
-                                             const char* attr_name,
-                                             TF_Status* status) {
-  TF_Attr_Metadata metadata;
+TF_AttrMetadata TF_OperationGetAttrMetadata(TF_Operation* oper,
+                                            const char* attr_name,
+                                            TF_Status* status) {
+  TF_AttrMetadata metadata;
   const auto* attr = GetAttrValue(oper, attr_name, status);
   if (!status->status.ok()) return metadata;
   switch (attr->value_case()) {
@@ -1543,7 +1544,7 @@ TF_Operation* TF_GraphOperationByName(TF_Graph* graph, const char* oper_name) {
 
 TF_Operation* TF_GraphNextOperation(TF_Graph* graph, size_t* pos) {
   if (*pos == 0) {
-    // Advance past the first sentinal nodes in every graph (the source & sink).
+    // Advance past the first sentinel nodes in every graph (the source & sink).
     *pos += 2;
   } else {
     // Advance to the next node.
@@ -1572,6 +1573,40 @@ void TF_GraphToGraphDef(TF_Graph* graph, TF_Buffer* output_graph_def,
     graph->graph.ToGraphDef(&def);
   }
   status->status = MessageToBuffer(def, output_graph_def);
+}
+
+struct TF_ImportGraphDefOptions {
+  tensorflow::ImportGraphDefOptions opts;
+};
+
+TF_ImportGraphDefOptions* TF_NewImportGraphDefOptions() {
+  return new TF_ImportGraphDefOptions;
+}
+void TF_DeleteImportGraphDefOptions(TF_ImportGraphDefOptions* opts) {
+  delete opts;
+}
+void TF_ImportGraphDefOptionsSetPrefix(TF_ImportGraphDefOptions* opts,
+                                       const char* prefix) {
+  opts->opts.prefix = prefix;
+}
+
+void TF_GraphImportGraphDef(TF_Graph* graph, const TF_Buffer* graph_def,
+                            const TF_ImportGraphDefOptions* opts,
+                            TF_Status* status) {
+  GraphDef def;
+  if (!def.ParseFromArray(graph_def->data, graph_def->length)) {
+    status->status = InvalidArgument("Invalid GraphDef");
+    return;
+  }
+  mutex_lock l(graph->mu);
+  const int last_node_id = graph->graph.num_node_ids();
+  status->status = tensorflow::ImportGraphDef(opts->opts, def, &graph->graph,
+                                              &graph->refiner);
+  if (!status->status.ok()) return;
+  for (int i = last_node_id; i < graph->graph.num_node_ids(); ++i) {
+    auto* node = graph->graph.FindNodeId(i);
+    if (node != nullptr) graph->name_map[node->name()] = node;
+  }
 }
 
 // TF_SessionWithGraph functions ----------------------------------------------

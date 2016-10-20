@@ -12,7 +12,7 @@ computed using the height of the precision values by the recall.
 
 This value is ultimately returned as `auc`, an idempotent operation that
 computes the area under a discretized curve of precision versus recall values
-(computed using the afformentioned variables). The `num_thresholds` variable
+(computed using the aforementioned variables). The `num_thresholds` variable
 controls the degree of discretization with larger numbers of thresholds more
 closely approximating the true AUC.
 
@@ -27,7 +27,7 @@ If `weights` is `None`, weights default to 1. Use weights of 0 to mask values.
 *  <b>`predictions`</b>: A floating point `Tensor` of arbitrary shape and whose values
     are in the range `[0, 1]`.
 *  <b>`labels`</b>: A `bool` `Tensor` whose shape matches `predictions`.
-*  <b>`weights`</b>: An optional `Tensor` whose shape matches `predictions`.
+*  <b>`weights`</b>: An optional `Tensor` whose shape is broadcastable to `predictions`.
 *  <b>`num_thresholds`</b>: The number of thresholds to use when discretizing the roc
     curve.
 *  <b>`metrics_collections`</b>: An optional list of collections that `auc` should be

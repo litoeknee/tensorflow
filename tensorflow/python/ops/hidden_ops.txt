@@ -1,4 +1,5 @@
 # array_ops
+BatchToSpace
 BroadcastGradientArgs
 ConcatOffset
 Concat
@@ -11,7 +12,9 @@ Pack
 Pad
 Placeholder
 RefIdentity
+SpaceToBatch
 Split
+Squeeze
 Slice
 TileGrad  # Exported through array_grad instead of array_ops.
 ZerosLike  # TODO(josh11b): Use this instead of the Python version.
@@ -55,6 +58,7 @@ LookupTableFind
 LookupTableImport
 LookupTableInsert
 LookupTableSize
+MutableDenseHashTable
 MutableHashTable
 MutableHashTableOfTensors
 Mutex
@@ -141,6 +145,7 @@ Svd
 # logging_ops
 Assert
 AudioSummary
+AudioSummaryV2
 HistogramAccumulatorSummary
 HistogramSummary
 ImageSummary
@@ -155,6 +160,12 @@ AddN
 All
 Any
 BatchMatMul
+BatchFFT
+BatchFFT2D
+BatchFFT3D
+BatchIFFT
+BatchIFFT2D
+BatchIFFT3D
 Complex
 Conj
 Max
@@ -223,6 +234,9 @@ TemporaryVariable
 DestroyTemporaryVariable
 
 # sparse_ops
+AddSparseToTensorsMap
+AddManySparseToTensorsMap
+TakeManySparseFromTensorsMap
 DeserializeManySparse
 SerializeManySparse
 SerializeSparse

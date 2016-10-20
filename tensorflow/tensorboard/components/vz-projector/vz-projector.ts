@@ -13,784 +13,479 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-import {DataPoint, DataSet, DataSource, PCA_SAMPLE_DIM, SAMPLE_SIZE} from './data';
-import {DataProvider, getDataProvider} from './data-loader';
+import {ColorOption, DataProto, DataSet, MetadataInfo, PointAccessor, Projection, State} from './data';
+import {DataProvider, getDataProvider, ServingMode, TensorInfo} from './data-loader';
+import {HoverContext, HoverListener} from './hoverContext';
 import * as knn from './knn';
+import * as logging from './logging';
+import {ProjectorScatterPlotAdapter} from './projectorScatterPlotAdapter';
 import {Mode, ScatterPlot} from './scatterPlot';
-import {ScatterPlotWebGL} from './scatterPlotWebGL';
-import {ScatterPlotWebGLVisualizerCanvasLabels} from './scatterPlotWebGLVisualizerCanvasLabels';
-import {ScatterPlotWebGLVisualizerSprites} from './scatterPlotWebGLVisualizerSprites';
-import {ScatterPlotWebGLVisualizerTraces} from './scatterPlotWebGLVisualizerTraces';
-import * as vector from './vector';
-import {ColorOption, DataPanel} from './vz-projector-data-panel';
+import {ScatterPlotVisualizer3DLabels} from './scatterPlotVisualizer3DLabels';
+import {ScatterPlotVisualizerCanvasLabels} from './scatterPlotVisualizerCanvasLabels';
+import {ScatterPlotVisualizerSprites} from './scatterPlotVisualizerSprites';
+import {ScatterPlotVisualizerTraces} from './scatterPlotVisualizerTraces';
+import {SelectionChangedListener, SelectionContext} from './selectionContext';
+import {BookmarkPanel} from './vz-projector-bookmark-panel';
+import {DataPanel} from './vz-projector-data-panel';
+import {InspectorPanel} from './vz-projector-inspector-panel';
+import {MetadataCard} from './vz-projector-metadata-card';
+import {ProjectionsPanel} from './vz-projector-projections-panel';
 // tslint:disable-next-line:no-unused-variable
 import {PolymerElement, PolymerHTMLElement} from './vz-projector-util';
 
-
-/** T-SNE perplexity. Roughly how many neighbors each point influences. */
-let perplexity: number = 30;
-/** T-SNE learning rate. */
-let learningRate: number = 10;
-/** Number of dimensions for the scatter plot. */
-let dimension = 3;
-/** Number of nearest neighbors to highlight around the selected point. */
-let numNN = 100;
-
-/** Highlight stroke color for the nearest neighbors. */
-const NN_HIGHLIGHT_COLOR = '#6666FA';
-/** Color to denote a missing value. */
-const MISSING_VALUE_COLOR = 'black';
-/** Highlight stroke color for the selected point */
-const POINT_HIGHLIGHT_COLOR_DAY = 'black';
-const POINT_HIGHLIGHT_COLOR_NIGHT = new THREE.Color(0xFFE11F).getStyle();
-
-/** Color scale for nearest neighbors. */
-const NN_COLOR_SCALE =
-    d3.scale.linear<string>()
-        .domain([1, 0.7, 0.4])
-        .range(['hsl(285, 80%, 40%)', 'hsl(0, 80%, 65%)', 'hsl(40, 70%, 60%)'])
-        .clamp(true);
-
-/** Text color used for error/important messages. */
-const CALLOUT_COLOR = '#880E4F';
-
-type Centroids = {
-  [key: string]: number[]; xLeft: number[]; xRight: number[]; yUp: number[];
-  yDown: number[];
-};
+/**
+ * The minimum number of dimensions the data should have to automatically
+ * decide to normalize the data.
+ */
+const THRESHOLD_DIM_NORMALIZE = 50;
+const POINT_COLOR_MISSING = 'black';
 
 export let ProjectorPolymer = PolymerElement({
   is: 'vz-projector',
   properties: {
-    // Private.
-    pcaComponents: {type: Array, value: d3.range(1, 11)},
-    pcaX: {
-      type: Number,
-      value: 0,
-      notify: true,
-    },
-    pcaY: {
-      type: Number,
-      value: 1,
-      notify: true,
-    },
-    pcaZ: {
-      type: Number,
-      value: 2,
-      notify: true,
-    },
-    hasPcaZ: {type: Boolean, value: true, notify: true},
-    labelOption: {type: String, observer: 'labelOptionChanged'},
-    colorOption: {type: Object, observer: 'colorOptionChanged'}
+    routePrefix: String,
+    dataProto: {type: String, observer: '_dataProtoChanged'},
+    servingMode: String
   }
 });
 
-export class Projector extends ProjectorPolymer {
-  dataSource: DataSource;
-
-  private dom: d3.Selection<any>;
-  private pcaX: number;
-  private pcaY: number;
-  private pcaZ: number;
-  private hasPcaZ: boolean;
+export class Projector extends ProjectorPolymer implements SelectionContext,
+                                                           HoverContext {
   // The working subset of the data source's original data set.
-  private currentDataSet: DataSet;
+  currentDataSet: DataSet;
+  servingMode: ServingMode;
+
+  private selectionChangedListeners: SelectionChangedListener[];
+  private hoverListeners: HoverListener[];
+
+  private dataSet: DataSet;
+  private dom: d3.Selection<any>;
+  private projectorScatterPlotAdapter: ProjectorScatterPlotAdapter;
   private scatterPlot: ScatterPlot;
   private dim: number;
-  private selectedDistance: (a: number[], b: number[]) => number;
-  private highlightedPoints: {index: number, color: string}[];
-  // The index of a point that has been individually clicked.
-  private clickedPoint: number;
-  // The index of all selected points.
-  private selectedPoints: number[];
-  private centroidValues: any;
-  private centroids: Centroids;
-  /** The centroid across all points. */
-  private allCentroid: number[];
+
+  private selectedPointIndices: number[];
+  private neighborsOfFirstPoint: knn.NearestEntry[];
+  private hoverPointIndex: number;
+
   private dataProvider: DataProvider;
+  private inspectorPanel: InspectorPanel;
+
+  private selectedColorOption: ColorOption;
+  private selectedLabelOption: string;
+  private routePrefix: string;
+  private normalizeData: boolean;
+  private selectedProjection: Projection;
+
+  /** Polymer component panels */
   private dataPanel: DataPanel;
-  private colorOption: ColorOption;
-  private labelOption: string;
+  private bookmarkPanel: BookmarkPanel;
+  private projectionsPanel: ProjectionsPanel;
+  private metadataCard: MetadataCard;
+
+  private statusBar: d3.Selection<HTMLElement>;
 
   ready() {
-    this.dataPanel = this.$['data-panel'];
-    // Get the data loader and initialize the data panel with it.
-    getDataProvider(dp => {
-      this.dataProvider = dp;
-      dp.getCheckpointInfo(
-          dataInfo => { this.dataPanel.initialize(this, dp, dataInfo); });
-    });
-
-    // And select a default dataset.
-    this.hasPcaZ = true;
-    this.selectedDistance = vector.cosDistNorm;
-    this.highlightedPoints = [];
-    this.clickedPoint = null;
-    this.selectedPoints = [];
-    this.centroidValues = {xLeft: null, xRight: null, yUp: null, yDown: null};
-    this.centroids = {xLeft: null, xRight: null, yUp: null, yDown: null};
-    // Dynamically creating elements inside .nn-list.
-    this.scopeSubtree(this.$$('.nn-list'), true);
+    this.selectionChangedListeners = [];
+    this.hoverListeners = [];
+    this.selectedPointIndices = [];
+    this.neighborsOfFirstPoint = [];
     this.dom = d3.select(this);
-    // Sets up all the UI.
+    logging.setDomContainer(this);
+    this.dataPanel = this.$['data-panel'] as DataPanel;
+    this.inspectorPanel = this.$['inspector-panel'] as InspectorPanel;
+    this.inspectorPanel.initialize(this);
+    this.projectionsPanel = this.$['projections-panel'] as ProjectionsPanel;
+    this.projectionsPanel.initialize(this);
+    this.metadataCard = this.$['metadata-card'] as MetadataCard;
+    this.statusBar = this.dom.select('#status-bar');
+    this.bookmarkPanel = this.$['bookmark-panel'] as BookmarkPanel;
+    this.scopeSubtree(this.$$('#wrapper-notify-msg'), true);
     this.setupUIControls();
+    this.initializeDataProvider();
   }
 
-  labelOptionChanged() {
+  setSelectedLabelOption(labelOption: string) {
+    this.selectedLabelOption = labelOption;
     let labelAccessor = (i: number): string => {
-      return this.points[i].metadata[this.labelOption] as string;
+      return this.currentDataSet.points[i]
+          .metadata[this.selectedLabelOption] as string;
     };
     this.scatterPlot.setLabelAccessor(labelAccessor);
+    this.metadataCard.setLabelOption(this.selectedLabelOption);
   }
 
-  colorOptionChanged() {
-    let colorMap = this.colorOption.map;
-    if (colorMap == null) {
-      this.scatterPlot.setColorAccessor(null);
-      return;
-    };
-    let colors = (i: number) => {
-      let value = this.points[i].metadata[this.colorOption.name];
-      if (value == null) {
-        return MISSING_VALUE_COLOR;
-      }
-      return colorMap(value);
-    };
-    this.scatterPlot.setColorAccessor(colors);
+  setSelectedColorOption(colorOption: ColorOption) {
+    this.selectedColorOption = colorOption;
+    this.updateScatterPlot();
   }
 
-  updateDataSource(ds: DataSource) {
-    this.dataSource = ds;
-    if (this.scatterPlot == null || this.dataSource == null) {
+  setNormalizeData(normalizeData: boolean) {
+    this.normalizeData = normalizeData;
+    this.setCurrentDataSet(this.dataSet.getSubset());
+  }
+
+  updateDataSet(ds: DataSet, metadata: MetadataInfo) {
+    this.dataSet = ds;
+    if (this.scatterPlot == null || this.dataSet == null) {
       // We are not ready yet.
       return;
     }
-
-    this.setDataSet(this.dataSource.getDataSet());
-    this.dom.select('.reset-filter').style('display', 'none');
-    // Regexp inputs.
-    this.setupInput('xLeft');
-    this.setupInput('xRight');
-    this.setupInput('yUp');
-    this.setupInput('yDown');
-
+    this.normalizeData = this.dataSet.dim[1] >= THRESHOLD_DIM_NORMALIZE;
+    if (metadata != null) {
+      ds.mergeMetadata(metadata);
+    }
+    this.dataPanel.setNormalizeData(this.normalizeData);
+    this.setCurrentDataSet(this.dataSet.getSubset());
+    this.inspectorPanel.datasetChanged();
+    if (metadata != null) {
+      this.inspectorPanel.metadataChanged(metadata);
+      this.projectionsPanel.metadataChanged(metadata);
+    }
     // Set the container to a fixed height, otherwise in Colab the
     // height can grow indefinitely.
     let container = this.dom.select('#container');
     container.style('height', container.property('clientHeight') + 'px');
   }
 
+  setSelectedTensor(run: string, tensorInfo: TensorInfo) {
+    this.bookmarkPanel.setSelectedTensor(run, tensorInfo);
+  }
+
   /**
-   * Normalizes the distance so it can be visually encoded with color.
-   * The normalization depends on the distance metric (cosine vs euclidean).
+   * Registers a listener to be called any time the selected point set changes.
    */
-  private normalizeDist(d: number, minDist: number): number {
-    return this.selectedDistance === vector.cosDistNorm ? 1 - d : minDist / d;
+  registerSelectionChangedListener(listener: SelectionChangedListener) {
+    this.selectionChangedListeners.push(listener);
   }
 
-  /** Normalizes and encodes the provided distance with color. */
-  private dist2color(d: number, minDist: number): string {
-    return NN_COLOR_SCALE(this.normalizeDist(d, minDist));
-  }
-
-  private setDataSet(ds: DataSet) {
-    this.currentDataSet = ds;
-    this.scatterPlot.setDataSet(
-        this.currentDataSet, this.dataSource.spriteImage);
-    this.updateMenuButtons();
-    this.dim = this.currentDataSet.dim[1];
-    this.dom.select('span.numDataPoints').text(this.currentDataSet.dim[0]);
-    this.dom.select('span.dim').text(this.currentDataSet.dim[1]);
-    this.showTab('pca');
-  }
-
-  private setupInput(name: string) {
-    let control = this.dom.select('.control.' + name);
-    let info = control.select('.info');
-
-    let updateInput = (value: string) => {
-      if (value.trim() === '') {
-        info.style('color', CALLOUT_COLOR).text('Enter a regex.');
-        return;
-      }
-      let result = this.getCentroid(value);
-      if (result.error) {
-        info.style('color', CALLOUT_COLOR)
-            .text('Invalid regex. Using a random vector.');
-        result.centroid = vector.rn(this.dim);
-      } else if (result.numMatches === 0) {
-        info.style('color', CALLOUT_COLOR)
-            .text('0 matches. Using a random vector.');
-        result.centroid = vector.rn(this.dim);
-      } else {
-        info.style('color', null).text(`${result.numMatches} matches.`);
-      }
-      this.centroids[name] = result.centroid;
-      this.centroidValues[name] = value;
-    };
-    let self = this;
-
-    let input = control.select('input').on('input', function() {
-      updateInput(this.value);
-      self.showCustom();
-    });
-    this.allCentroid = null;
-    // Init the control with the current input.
-    updateInput((input.node() as HTMLInputElement).value);
-  }
-
-  private setupUIControls() {
-    let self = this;
-    // Global tabs
-    d3.selectAll('.ink-tab').on('click', function() {
-      let id = this.getAttribute('data-tab');
-      self.showTab(id);
-    });
-
-    // Unknown why, but the polymer toggle button stops working
-    // as soon as you do d3.select() on it.
-    let tsneToggle = this.querySelector('#tsne-toggle') as HTMLInputElement;
-    let zCheckbox = this.querySelector('#z-checkbox') as HTMLInputElement;
-
-    // PCA controls.
-    zCheckbox.addEventListener('change', () => {
-      // Make sure tsne stays in the same dimension as PCA.
-      dimension = this.hasPcaZ ? 3 : 2;
-      tsneToggle.checked = this.hasPcaZ;
-      this.showPCA(() => {
-        this.scatterPlot.recreateScene();
-      });
-    });
-    this.dom.on('pca-x-changed', () => this.showPCA());
-    this.dom.on('pca-y-changed', () => this.showPCA());
-    this.dom.on('pca-z-changed', () => this.showPCA());
-
-    // TSNE controls.
-
-    tsneToggle.addEventListener('change', () => {
-      // Make sure PCA stays in the same dimension as tsne.
-      this.hasPcaZ = tsneToggle.checked;
-      dimension = tsneToggle.checked ? 3 : 2;
-      if (this.scatterPlot) {
-        this.showTSNE();
-        this.scatterPlot.recreateScene();
-      }
-    });
-
-    this.dom.select('.run-tsne').on('click', () => this.runTSNE());
-    this.dom.select('.stop-tsne').on('click', () => {
-      this.currentDataSet.stopTSNE();
-    });
-
-    let perplexityInput = this.dom.select('.tsne-perplexity input');
-    let updatePerplexity = () => {
-      perplexity = +perplexityInput.property('value');
-      this.dom.select('.tsne-perplexity span').text(perplexity);
-    };
-    perplexityInput.property('value', perplexity).on('input', updatePerplexity);
-    updatePerplexity();
-
-    let learningRateInput = this.dom.select('.tsne-learning-rate input');
-    let updateLearningRate = () => {
-      let val = +learningRateInput.property('value');
-      learningRate = Math.pow(10, val);
-      this.dom.select('.tsne-learning-rate span').text(learningRate);
-    };
-    learningRateInput.property('value', 1).on('input', updateLearningRate);
-    updateLearningRate();
-
-    // Nearest neighbors controls.
-    let numNNInput = this.dom.select('.num-nn input');
-    let updateNumNN = () => {
-      numNN = +numNNInput.property('value');
-      this.dom.select('.num-nn span').text(numNN);
-    };
-    numNNInput.property('value', numNN).on('input', updateNumNN);
-    updateNumNN();
-
-    // View controls
-    this.dom.select('.reset-zoom').on('click', () => {
-      this.scatterPlot.resetZoom();
-    });
-    this.dom.select('.zoom-in').on('click', () => {
-      this.scatterPlot.zoomStep(2);
-    });
-    this.dom.select('.zoom-out').on('click', () => {
-      this.scatterPlot.zoomStep(0.5);
-    });
-
-    // Toolbar controls
-    let searchBox = this.dom.select('.control.search-box');
-    let searchBoxInfo = searchBox.select('.info');
-
-    let searchByRegEx =
-        (pattern: string): {error?: Error, indices: number[]} => {
-          let regEx: RegExp;
-          try {
-            regEx = new RegExp(pattern, 'i');
-          } catch (e) {
-            return {error: e.message, indices: null};
-          }
-          let indices: number[] = [];
-          for (let id = 0; id < this.points.length; ++id) {
-            if (regEx.test('' + this.points[id].metadata['label'])) {
-              indices.push(id);
-            }
-          }
-          return {indices: indices};
-        };
-
-    // Called whenever the search text input changes.
-    let searchInputChanged = (value: string) => {
-      if (value.trim() === '') {
-        searchBoxInfo.style('color', CALLOUT_COLOR).text('Enter a regex.');
-        if (this.scatterPlot != null) {
-          this.selectedPoints = [];
-          this.selectionWasUpdated();
-        }
-        return;
-      }
-      let result = searchByRegEx(value);
-      let indices = result.indices;
-      if (result.error) {
-        searchBoxInfo.style('color', CALLOUT_COLOR).text('Invalid regex.');
-      }
-      if (indices) {
-        if (indices.length === 0) {
-          searchBoxInfo.style('color', CALLOUT_COLOR).text(`0 matches.`);
-        } else {
-          searchBoxInfo.style('color', null).text(`${indices.length} matches.`);
-          this.showTab('inspector');
-          let neighbors = this.findNeighbors(indices[0]);
-          if (indices.length === 1) {
-            this.clickedPoint = indices[0];
-            this.scatterPlot.clickOnPoint(this.clickedPoint);
-          }
-          this.selectedPoints = indices;
-          this.updateNNList(neighbors);
-        }
-        this.selectionWasUpdated();
-      }
-    };
-
-    searchBox.select('input').on(
-        'input', function() { searchInputChanged(this.value); });
-    let searchButton = this.dom.select('.search');
-
-    searchButton.on('click', () => {
-      let mode = this.scatterPlot.getMode();
-      this.scatterPlot.setMode(mode === Mode.SEARCH ? Mode.HOVER : Mode.SEARCH);
-      if (this.scatterPlot.getMode() === Mode.HOVER) {
-        this.selectedPoints = [];
-        this.selectionWasUpdated();
-      } else {
-        searchInputChanged(searchBox.select('input').property('value'));
-      }
-      this.updateMenuButtons();
-    });
-    // Init the control with an empty input.
-    searchInputChanged('');
-
-    this.dom.select('.distance a.euclidean').on('click', function() {
-      d3.selectAll('.distance a').classed('selected', false);
-      d3.select(this).classed('selected', true);
-      self.selectedDistance = vector.dist;
-      if (self.selectedPoints.length > 0) {
-        let neighbors = self.findNeighbors(self.selectedPoints[0]);
-        self.updateNNList(neighbors);
-      }
-    });
-
-    this.dom.select('.distance a.cosine').on('click', function() {
-      d3.selectAll('.distance a').classed('selected', false);
-      d3.select(this).classed('selected', true);
-      self.selectedDistance = vector.cosDistNorm;
-      if (self.selectedPoints.length > 0) {
-        let neighbors = self.findNeighbors(self.selectedPoints[0]);
-        self.updateNNList(neighbors);
-      }
-    });
-
-    let selectModeButton = this.dom.select('.selectMode');
-
-    selectModeButton.on('click', () => {
-      let mode = this.scatterPlot.getMode();
-      this.scatterPlot.setMode(mode === Mode.SELECT ? Mode.HOVER : Mode.SELECT);
-      this.updateMenuButtons();
-    });
-
-    let dayNightModeButton = this.dom.select('.nightDayMode');
-    let modeIsNight = dayNightModeButton.classed('selected');
-    dayNightModeButton.on('click', () => {
-      modeIsNight = !modeIsNight;
-      this.scatterPlot.setDayNightMode(modeIsNight);
-      this.scatterPlot.update();
-      dayNightModeButton.classed('selected', modeIsNight);
-    });
-
-    // Resize
-    window.addEventListener('resize', () => {
-      this.scatterPlot.resize();
-    });
-
-    // Canvas
-    {
-      let container = this.dom.select('#scatter');
-      let scatterPlotWebGL = new ScatterPlotWebGL(
-          container, i => '' + this.points[i].metadata['label']);
-
-      scatterPlotWebGL.addVisualizer(
-          new ScatterPlotWebGLVisualizerSprites(scatterPlotWebGL));
-
-      scatterPlotWebGL.addVisualizer(
-          new ScatterPlotWebGLVisualizerTraces(scatterPlotWebGL));
-
-      scatterPlotWebGL.addVisualizer(
-          new ScatterPlotWebGLVisualizerCanvasLabels(container));
-
-      this.scatterPlot = scatterPlotWebGL;
-      this.scatterPlot.setDayNightMode(modeIsNight);
-    }
-
-    this.scatterPlot.onHover(hoveredIndex => {
-      if (hoveredIndex == null) {
-        this.highlightedPoints = [];
-      } else {
-        let point = this.points[hoveredIndex];
-        this.dom.select('#hoverInfo').text(point.metadata['label']);
-        this.highlightedPoints = [{
-          index: hoveredIndex,
-          color: modeIsNight ? POINT_HIGHLIGHT_COLOR_NIGHT :
-                               POINT_HIGHLIGHT_COLOR_DAY,
-        }];
-      }
-      this.selectionWasUpdated();
-    });
-
-    this.scatterPlot.onSelection(
-        selectedPoints => this.updateSelection(selectedPoints));
-
-    // Selection controls
-    this.dom.select('.set-filter').on('click', () => {
-      let highlighted = this.selectedPoints;
-      let highlightedOrig: number[] =
-          highlighted.map(d => { return this.points[d].dataSourceIndex; });
-      let subset = this.dataSource.getDataSet(highlightedOrig);
-      this.setDataSet(subset);
-      this.dom.select('.reset-filter').style('display', null);
-      this.selectedPoints = [];
-      this.scatterPlot.recreateScene();
-      this.selectionWasUpdated();
-      this.updateIsolateButton();
-    });
-
-    this.dom.select('.reset-filter').on('click', () => {
-      let subset = this.dataSource.getDataSet();
-      this.setDataSet(subset);
-      this.dom.select('.reset-filter').style('display', 'none');
-    });
-
-    this.dom.select('.clear-selection').on('click', () => {
-      this.selectedPoints = [];
-      this.scatterPlot.setMode(Mode.HOVER);
-      this.scatterPlot.clickOnPoint(null);
-      this.updateMenuButtons();
-      this.selectionWasUpdated();
-    });
-  }
-
-  private updateSelection(selectedPoints: number[]) {
-    // If no points are selected, unselect everything.
-    if (!selectedPoints.length) {
-      this.clickedPoint = null;
-      this.selectedPoints = [];
-      this.updateNNList([]);
-    } else if (selectedPoints.length === 1) {
-      // If only one point is selected, we want to get its nearest neighbors
-      // and change the UI accordingly.
-      this.clickedPoint = selectedPoints[0];
-      this.showTab('inspector');
-      let neighbors = this.findNeighbors(this.clickedPoint);
-      this.selectedPoints =
-          [this.clickedPoint].concat(neighbors.map(n => n.index));
-      this.updateNNList(neighbors);
-    } else {
-      this.clickedPoint = null;
-      // Otherwise, select all points and hide nearest neighbors list.
-      this.selectedPoints = selectedPoints as number[];
-      this.highlightedPoints = [];
-      this.updateNNList([]);
-    }
-    this.updateMetadata();
-    this.selectionWasUpdated();
-  }
-
-  private showPCA(callback?: () => void) {
-    this.currentDataSet.projectPCA().then(() => {
-      this.scatterPlot.showTickLabels(false);
-      let x = this.pcaX;
-      let y = this.pcaY;
-      let z = this.pcaZ;
-      let hasZ = dimension === 3;
-      this.scatterPlot.setXAccessor(
-          i => this.points[i].projections['pca-' + x]);
-      this.scatterPlot.setYAccessor(
-          i => this.points[i].projections['pca-' + y]);
-      this.scatterPlot.setZAccessor(
-          hasZ ? (i => this.points[i].projections['pca-' + z]) : null);
-      this.scatterPlot.setAxisLabels('pca-' + x, 'pca-' + y);
-      this.scatterPlot.update();
-      if (callback) {
-        callback();
-      }
-    });
-  }
-
-  private showTab(id: string) {
-    let tab = this.dom.select('.ink-tab[data-tab="' + id + '"]');
-    let pane =
-        d3.select((tab.node() as HTMLElement).parentNode.parentNode.parentNode);
-    pane.selectAll('.ink-tab').classed('active', false);
-    tab.classed('active', true);
-    pane.selectAll('.ink-panel-content').classed('active', false);
-    pane.select('.ink-panel-content[data-panel="' + id + '"]')
-        .classed('active', true);
-    if (id === 'pca') {
-      this.showPCA(() => this.scatterPlot.recreateScene());
-    } else if (id === 'tsne') {
-      this.showTSNE();
-    } else if (id === 'custom') {
-      this.showCustom();
-    }
-  }
-
-  private showCustom() {
-    this.scatterPlot.showTickLabels(true);
-    let xDir = vector.sub(this.centroids.xRight, this.centroids.xLeft);
-    this.currentDataSet.projectLinear(xDir, 'linear-x');
-    this.scatterPlot.setXAccessor(i => this.points[i].projections['linear-x']);
-
-    let yDir = vector.sub(this.centroids.yUp, this.centroids.yDown);
-    this.currentDataSet.projectLinear(yDir, 'linear-y');
-    this.scatterPlot.setYAccessor(i => this.points[i].projections['linear-y']);
-
-    // Scatter is only in 2D in projection mode.
-    this.scatterPlot.setZAccessor(null);
-
-    let xLabel = this.centroidValues.xLeft + ' → ' + this.centroidValues.xRight;
-    let yLabel = this.centroidValues.yUp + ' → ' + this.centroidValues.yDown;
-    this.scatterPlot.setAxisLabels(xLabel, yLabel);
-    this.scatterPlot.update();
+  filterDataset() {
+    let indices = this.selectedPointIndices.concat(
+        this.neighborsOfFirstPoint.map(n => n.index));
+    this.setCurrentDataSet(this.currentDataSet.getSubset(indices));
+    this.clearSelectionAndHover();
     this.scatterPlot.recreateScene();
   }
 
-  private get points() { return this.currentDataSet.points; }
-
-  private showTSNE() {
-    this.scatterPlot.showTickLabels(false);
-    this.scatterPlot.setXAccessor(i => this.points[i].projections['tsne-0']);
-    this.scatterPlot.setYAccessor(i => this.points[i].projections['tsne-1']);
-    this.scatterPlot.setZAccessor(
-        dimension === 3 ? (i => this.points[i].projections['tsne-2']) : null);
-    this.scatterPlot.setAxisLabels('tsne-0', 'tsne-1');
-    if (!this.currentDataSet.hasTSNERun) {
-      this.runTSNE();
-    } else {
-      this.scatterPlot.update();
-    }
-  }
-
-  private runTSNE() {
-    this.currentDataSet.projectTSNE(
-        perplexity, learningRate, dimension, (iteration: number) => {
-          if (iteration != null) {
-            this.dom.select('.run-tsne-iter').text(iteration);
-            this.scatterPlot.update();
-          }
-        });
-  }
-
-  // Updates the displayed metadata for the selected point.
-  private updateMetadata() {
-    let metadataContainerElement = this.dom.select('.ink-panel-metadata');
-    metadataContainerElement.selectAll('*').remove();
-
-    let display = false;
-    if (this.clickedPoint != null) {
-      let selectedPoint = this.points[this.clickedPoint];
-
-      for (let metadataKey in selectedPoint.metadata) {
-        if (!selectedPoint.metadata.hasOwnProperty(metadataKey)) {
-          continue;
-        }
-        let rowElement = document.createElement('div');
-        rowElement.className = 'ink-panel-metadata-row vz-projector';
-
-        let keyElement = document.createElement('div');
-        keyElement.className = 'ink-panel-metadata-key vz-projector';
-        keyElement.textContent = metadataKey;
-
-        let valueElement = document.createElement('div');
-        valueElement.className = 'ink-panel-metadata-value vz-projector';
-        valueElement.textContent = '' + selectedPoint.metadata[metadataKey];
-
-        rowElement.appendChild(keyElement);
-        rowElement.appendChild(valueElement);
-
-        metadataContainerElement.append(function() {
-          return this.appendChild(rowElement);
-        });
-      }
-
-      display = true;
-    }
-
-    this.dom.select('.ink-panel-metadata-container')
-        .style('display', display ? '' : 'none');
-  }
-
-  private selectionWasUpdated() {
-    this.dom.select('#hoverInfo')
-        .text(`Selected ${this.selectedPoints.length} points`);
-    let allPoints =
-        this.highlightedPoints.map(x => x.index).concat(this.selectedPoints);
-    let stroke = (i: number) => {
-      return i < this.highlightedPoints.length ?
-          this.highlightedPoints[i].color :
-          NN_HIGHLIGHT_COLOR;
-    };
-    let favor = (i: number) => {
-      return i === 0 || (i < this.highlightedPoints.length ? false : true);
-    };
-    this.scatterPlot.highlightPoints(allPoints, stroke, favor);
-    this.updateIsolateButton();
-  }
-
-  private updateMenuButtons() {
-    let searchBox = this.dom.select('.control.search-box');
-    this.dom.select('.search').classed(
-        'selected', this.scatterPlot.getMode() === Mode.SEARCH);
-    let searchMode = this.scatterPlot.getMode() === Mode.SEARCH;
-    this.dom.select('.control.search-box')
-        .style('width', searchMode ? '110px' : null)
-        .style('margin-right', searchMode ? '10px' : null);
-    (searchBox.select('input').node() as HTMLInputElement).focus();
-    this.dom.select('.selectMode')
-        .classed('selected', this.scatterPlot.getMode() === Mode.SELECT);
+  resetFilterDataset() {
+    this.setCurrentDataSet(this.dataSet.getSubset(null));
+    this.selectedPointIndices = [];
   }
 
   /**
-   * Finds the nearest neighbors of the currently selected point using the
-   * currently selected distance method.
+   * Used by clients to indicate that a selection has occurred.
    */
-  private findNeighbors(pointIndex: number): knn.NearestEntry[] {
-    // Find the nearest neighbors of a particular point.
-    let neighbors = knn.findKNNofPoint(
-        this.points, pointIndex, numNN, (d => d.vector), this.selectedDistance);
-    let result = neighbors.slice(0, numNN);
-    return result;
-  }
+  notifySelectionChanged(newSelectedPointIndices: number[]) {
+    this.selectedPointIndices = newSelectedPointIndices;
+    let neighbors: knn.NearestEntry[] = [];
 
-  /** Updates the nearest neighbors list in the inspector. */
-  private updateNNList(neighbors: knn.NearestEntry[]) {
-    let nnlist = this.dom.select('.nn-list');
-    nnlist.html('');
-
-    if (neighbors.length === 0) {
-      this.dom.select('#nn-title').text('');
-      return;
-    }
-
-    let selectedPoint = this.points[this.clickedPoint];
-    this.dom.select('#nn-title')
-        .text(selectedPoint != null ? selectedPoint.metadata['label'] : '');
-
-    let minDist = neighbors.length > 0 ? neighbors[0].dist : 0;
-    let n = nnlist.selectAll('.neighbor')
-                .data(neighbors)
-                .enter()
-                .append('div')
-                .attr('class', 'neighbor')
-                .append('a')
-                .attr('class', 'neighbor-link');
-
-    n.append('span')
-        .attr('class', 'label')
-        .style('color', d => this.dist2color(d.dist, minDist))
-        .text(d => this.points[d.index].metadata['label']);
-
-    n.append('span').attr('class', 'value').text(d => d.dist.toFixed(2));
-
-    let bar = n.append('div').attr('class', 'bar');
-
-    bar.append('div')
-        .attr('class', 'fill')
-        .style('border-top-color', d => this.dist2color(d.dist, minDist))
-        .style('width', d => this.normalizeDist(d.dist, minDist) * 100 + '%');
-
-    bar.selectAll('.tick')
-        .data(d3.range(1, 4))
-        .enter()
-        .append('div')
-        .attr('class', 'tick')
-        .style('left', d => d * 100 / 4 + '%');
-
-    n.on('click', d => { this.updateSelection([d.index]); });
-  }
-
-  private updateIsolateButton() {
-    let numPoints = this.selectedPoints.length;
-    let isolateButton = this.dom.select('.set-filter');
-    let clearButton = this.dom.select('button.clear-selection');
-    if (numPoints > 1) {
-      isolateButton.text(`Isolate ${numPoints} points`).style('display', null);
-      clearButton.style('display', null);
+    if (newSelectedPointIndices.length === 1) {
+      neighbors = this.currentDataSet.findNeighbors(
+          newSelectedPointIndices[0], this.inspectorPanel.distFunc,
+          this.inspectorPanel.numNN);
+      this.metadataCard.updateMetadata(
+          this.dataSet.points[newSelectedPointIndices[0]].metadata);
     } else {
-      isolateButton.style('display', 'none');
-      clearButton.style('display', 'none');
+      this.metadataCard.updateMetadata(null);
+    }
+
+    this.selectionChangedListeners.forEach(
+        l => l(this.selectedPointIndices, neighbors));
+  }
+
+  /**
+   * Registers a listener to be called any time the mouse hovers over a point.
+   */
+  registerHoverListener(listener: HoverListener) {
+    this.hoverListeners.push(listener);
+  }
+
+  /**
+   * Used by clients to indicate that a hover is occurring.
+   */
+  notifyHoverOverPoint(pointIndex: number) {
+    this.hoverListeners.forEach(l => l(pointIndex));
+  }
+
+  _dataProtoChanged(dataProtoString: string) {
+    let dataProto = dataProtoString ?
+        JSON.parse(dataProtoString) as DataProto : null;
+    this.initializeDataProvider(dataProto);
+  }
+
+  private initializeDataProvider(dataProto?: DataProto) {
+    getDataProvider(this.servingMode, dataProto, this.routePrefix,
+        dataProvider => {
+      this.dataProvider = dataProvider;
+      this.dataPanel.initialize(this, dataProvider);
+      this.bookmarkPanel.initialize(this, dataProvider);
+    });
+  }
+
+  private getLegendPointColorer(colorOption: ColorOption):
+      (index: number) => string {
+    if ((colorOption == null) || (colorOption.map == null)) {
+      return null;
+    }
+    const colorer = (i: number) => {
+      let value =
+          this.currentDataSet.points[i].metadata[this.selectedColorOption.name];
+      if (value == null) {
+        return POINT_COLOR_MISSING;
+      }
+      return colorOption.map(value);
+    };
+    return colorer;
+  }
+
+  private get3DLabelModeButton(): any {
+    return this.querySelector('#labels3DMode');
+  }
+
+  private get3DLabelMode(): boolean {
+    const label3DModeButton = this.get3DLabelModeButton();
+    return (label3DModeButton as any).active;
+  }
+
+  clearSelectionAndHover() {
+    this.notifySelectionChanged([]);
+    this.notifyHoverOverPoint(null);
+    this.scatterPlot.setMode(Mode.HOVER);
+  }
+
+  private unsetCurrentDataSet() {
+    this.currentDataSet.stopTSNE();
+  }
+
+  private setCurrentDataSet(ds: DataSet) {
+    this.clearSelectionAndHover();
+    if (this.currentDataSet != null) {
+      this.unsetCurrentDataSet();
+    }
+    this.currentDataSet = ds;
+    if (this.normalizeData) {
+      this.currentDataSet.normalize();
+    }
+    this.dim = this.currentDataSet.dim[1];
+    this.dom.select('span.numDataPoints').text(this.currentDataSet.dim[0]);
+    this.dom.select('span.dim').text(this.currentDataSet.dim[1]);
+
+    this.projectionsPanel.dataSetUpdated(this.currentDataSet, this.dim);
+
+    this.scatterPlot.setDataSet(this.currentDataSet, this.dataSet.spriteImage);
+    this.updateScatterPlot();
+  }
+
+  private setupUIControls() {
+    // View controls
+    this.querySelector('#reset-zoom').addEventListener('click', () => {
+      this.scatterPlot.resetZoom();
+      this.scatterPlot.startOrbitAnimation();
+    });
+
+    let selectModeButton = this.querySelector('#selectMode');
+    selectModeButton.addEventListener('click', (event) => {
+      this.scatterPlot.setMode(
+          (selectModeButton as any).active ? Mode.SELECT : Mode.HOVER);
+    });
+    let nightModeButton = this.querySelector('#nightDayMode');
+    nightModeButton.addEventListener('click', () => {
+      this.scatterPlot.setDayNightMode((nightModeButton as any).active);
+    });
+
+    const labels3DModeButton = this.get3DLabelModeButton();
+    labels3DModeButton.addEventListener('click', () => {
+      this.createVisualizers((labels3DModeButton as any).active);
+      this.scatterPlot.recreateScene();
+      this.updateScatterPlot();
+      this.scatterPlot.update();
+    });
+
+    window.addEventListener('resize', () => {
+      let container = this.dom.select('#container');
+      let parentHeight =
+          (container.node().parentNode as HTMLElement).clientHeight;
+      container.style('height', parentHeight + 'px');
+      this.scatterPlot.resize();
+    });
+
+    this.projectorScatterPlotAdapter = new ProjectorScatterPlotAdapter();
+
+    this.scatterPlot = new ScatterPlot(
+        this.getScatterContainer(), i => '' +
+            this.currentDataSet.points[i].metadata[this.selectedLabelOption],
+        this, this);
+    this.createVisualizers(false);
+
+    this.scatterPlot.onCameraMove(
+        (cameraPosition: THREE.Vector3, cameraTarget: THREE.Vector3) =>
+            this.bookmarkPanel.clearStateSelection());
+
+    this.registerHoverListener(
+        (hoverIndex: number) => this.onHover(hoverIndex));
+
+    this.registerSelectionChangedListener(
+        (selectedPointIndices: number[],
+         neighborsOfFirstPoint: knn.NearestEntry[]) =>
+            this.onSelectionChanged(
+                selectedPointIndices, neighborsOfFirstPoint));
+  }
+
+  private onHover(hoverIndex: number) {
+    this.hoverPointIndex = hoverIndex;
+    let hoverText = null;
+    if (hoverIndex != null) {
+      const point = this.currentDataSet.points[hoverIndex];
+      if (point.metadata[this.selectedLabelOption]) {
+        hoverText = point.metadata[this.selectedLabelOption].toString();
+      }
+    }
+    this.updateScatterPlot();
+    if (this.selectedPointIndices.length === 0) {
+      this.statusBar.style('display', hoverText ? null : 'none');
+      this.statusBar.text(hoverText);
     }
   }
 
-  getPcaSampledDim() { return PCA_SAMPLE_DIM.toLocaleString(); }
+  private updateScatterPlot() {
+    const dataSet = this.currentDataSet;
+    const selectedSet = this.selectedPointIndices;
+    const hoverIndex = this.hoverPointIndex;
+    const neighbors = this.neighborsOfFirstPoint;
+    const pointColorer = this.getLegendPointColorer(this.selectedColorOption);
 
-  getTsneSampleSize() { return SAMPLE_SIZE.toLocaleString(); }
+    const pointColors =
+        this.projectorScatterPlotAdapter.generatePointColorArray(
+            dataSet, pointColorer, selectedSet, neighbors, hoverIndex,
+            this.get3DLabelMode());
+    const pointScaleFactors =
+        this.projectorScatterPlotAdapter.generatePointScaleFactorArray(
+            dataSet, selectedSet, neighbors, hoverIndex);
+    const labels =
+        this.projectorScatterPlotAdapter.generateVisibleLabelRenderParams(
+            dataSet, selectedSet, neighbors, hoverIndex);
 
-  private getCentroid(pattern: string): CentroidResult {
-    let accessor = (a: DataPoint) => a.vector;
-    if (pattern == null) {
-      return {numMatches: 0};
-    }
-    if (pattern === '') {
-      if (this.allCentroid == null) {
-        this.allCentroid =
-            vector.centroid(this.points, () => true, accessor).centroid;
-      }
-      return {centroid: this.allCentroid, numMatches: this.points.length};
-    }
+    this.scatterPlot.setPointColors(pointColors);
+    this.scatterPlot.setPointScaleFactors(pointScaleFactors);
+    this.scatterPlot.setLabels(labels);
+    this.scatterPlot.render();
+  }
 
-    let regExp: RegExp;
-    let predicate: (a: DataPoint) => boolean;
-    // Check for a regex.
-    if (pattern.charAt(0) === '/' &&
-        pattern.charAt(pattern.length - 1) === '/') {
-      pattern = pattern.slice(1, pattern.length - 1);
-      try {
-        regExp = new RegExp(pattern, 'i');
-      } catch (e) {
-        return {error: e.message};
-      }
-      predicate =
-          (a: DataPoint) => { return regExp.test('' + a.metadata['label']); };
-      // else does an exact match
+  private getScatterContainer(): d3.Selection<any> {
+    return this.dom.select('#scatter');
+  }
+
+  private createVisualizers(inLabels3DMode: boolean) {
+    const scatterPlot = this.scatterPlot;
+    const selectionContext = this;
+    scatterPlot.removeAllVisualizers();
+
+    if (inLabels3DMode) {
+      scatterPlot.addVisualizer(new ScatterPlotVisualizer3DLabels());
     } else {
-      predicate = (a: DataPoint) => { return a.metadata['label'] === pattern; };
+      scatterPlot.addVisualizer(new ScatterPlotVisualizerSprites());
+      scatterPlot.addVisualizer(
+          new ScatterPlotVisualizerTraces(selectionContext));
+      scatterPlot.addVisualizer(
+          new ScatterPlotVisualizerCanvasLabels(this.getScatterContainer()));
     }
-    return vector.centroid(this.points, predicate, accessor);
+  }
+
+  private onSelectionChanged(
+      selectedPointIndices: number[],
+      neighborsOfFirstPoint: knn.NearestEntry[]) {
+    this.selectedPointIndices = selectedPointIndices;
+    this.neighborsOfFirstPoint = neighborsOfFirstPoint;
+    let totalNumPoints =
+        this.selectedPointIndices.length + neighborsOfFirstPoint.length;
+    this.statusBar.text(`Selected ${totalNumPoints} points`)
+        .style('display', totalNumPoints > 0 ? null : 'none');
+    this.inspectorPanel.updateInspectorPane(
+        selectedPointIndices, neighborsOfFirstPoint);
+    this.updateScatterPlot();
+  }
+
+  setProjection(
+      projection: Projection, dimensionality: number,
+      pointAccessors: [PointAccessor, PointAccessor, PointAccessor]) {
+    this.selectedProjection = projection;
+    this.scatterPlot.setDimensions(dimensionality);
+    this.scatterPlot.showTickLabels(false);
+    this.scatterPlot.setPointAccessors(pointAccessors);
+
+    /* tsne needs to do an iteration for the points to look reasonable */
+    if (projection !== 'tsne') {
+      this.scatterPlot.update();
+    }
+
+    this.scatterPlot.recreateScene();
+    this.scatterPlot.setCameraDefForNextCameraCreation(null);
+  }
+
+  notifyProjectionsUpdated() {
+    this.scatterPlot.update();
+  }
+
+  /**
+   * Gets the current view of the embedding and saves it as a State object.
+   */
+  getCurrentState(): State {
+    let state: State = {};
+
+    // Save the individual datapoint projections.
+    state.projections = [];
+    for (let i = 0; i < this.currentDataSet.points.length; i++) {
+      state.projections.push(this.currentDataSet.points[i].projections);
+    }
+
+    state.selectedProjection = this.selectedProjection;
+    state.is3d = this.projectionsPanel.is3d;
+    if (this.selectedProjection === 'pca') {
+      state.componentDimensions =
+          this.projectionsPanel.getPCAComponentUIValues();
+    }
+    state.selectedPoints = this.selectedPointIndices;
+    state.cameraDef = this.scatterPlot.getCameraDef();
+
+    // Save the color and label by options.
+    state.selectedColorOptionName = this.dataPanel.selectedColorOptionName;
+    state.selectedLabelOption = this.selectedLabelOption;
+
+    return state;
+  }
+
+  /** Loads a State object into the world. */
+  loadState(state: State) {
+    for (let i = 0; i < state.projections.length; i++) {
+      this.currentDataSet.points[i].projections = state.projections[i];
+    }
+    if (state.selectedProjection === 'tsne') {
+      this.currentDataSet.hasTSNERun = true;
+    }
+
+    this.projectionsPanel.disablePolymerChangesTriggerReprojection();
+    this.projectionsPanel.is3d = state.is3d;
+    if (state.selectedProjection === 'pca') {
+      this.projectionsPanel.setPCAComponentUIValues(state.componentDimensions);
+    }
+    this.projectionsPanel.showTab(state.selectedProjection);
+    this.projectionsPanel.enablePolymerChangesTriggerReprojection();
+
+    // Load the color and label by options.
+    this.dataPanel.selectedColorOptionName = state.selectedColorOptionName;
+    this.selectedLabelOption = state.selectedLabelOption;
+
+    this.scatterPlot.setCameraDefForNextCameraCreation(state.cameraDef);
+
+    {
+      const accessors = this.currentDataSet.getPointAccessors(
+          state.selectedProjection, state.componentDimensions);
+      this.setProjection(
+          state.selectedProjection, state.is3d ? 3 : 2, accessors);
+    }
+
+    this.notifySelectionChanged(state.selectedPoints);
   }
 }
-
-type CentroidResult = {
-  centroid?: number[]; numMatches?: number; error?: string
-};
 
 document.registerElement(Projector.prototype.is, Projector);

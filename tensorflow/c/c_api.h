@@ -89,6 +89,7 @@ typedef enum {
   TF_UINT16 = 17,
   TF_COMPLEX128 = 18,  // Double-precision complex
   TF_HALF = 19,
+  TF_RESOURCE = 20,
 } TF_DataType;
 
 // --------------------------------------------------------------------------
@@ -537,7 +538,7 @@ extern int TF_OperationGetControlOutputs(TF_Operation* oper,
                                          TF_Operation** control_outputs,
                                          int max_control_outputs);
 
-// TF_Attr_Type describes the type of the value of an attribute on an operation.
+// TF_AttrType describes the type of the value of an attribute on an operation.
 typedef enum {
   TF_ATTR_STRING = 0,
   TF_ATTR_INT = 1,
@@ -548,9 +549,9 @@ typedef enum {
   TF_ATTR_TENSOR = 6,
   TF_ATTR_PLACEHOLDER = 7,
   TF_ATTR_FUNC = 8,
-} TF_Attr_Type;
+} TF_AttrType;
 
-// TF_Attr_Metadata describes the value of an attribute on an operation.
+// TF_AttrMetadata describes the value of an attribute on an operation.
 typedef struct {
   // A boolean: 1 if the attribute value is a list, 0 otherwise.
   unsigned char is_list;
@@ -560,7 +561,7 @@ typedef struct {
 
   // Type of elements of the list if is_list != 0.
   // Type of the single value stored in the attribute if is_list == 0.
-  TF_Attr_Type type;
+  TF_AttrType type;
 
   // Total size the attribute value.
   // The units of total_size depend on is_list and type.
@@ -579,16 +580,16 @@ typedef struct {
   //     of dimensions of all shapes in the list.
   // (5) Otherwise, total_size is undefined.
   int64_t total_size;
-} TF_Attr_Metadata;
+} TF_AttrMetadata;
 
 // Returns metadata about the value of the attribute `attr_name` of `oper`.
-TF_Attr_Metadata TF_OperationGetAttrMetadata(TF_Operation* oper,
-                                             const char* attr_name,
-                                             TF_Status* status);
+extern TF_AttrMetadata TF_OperationGetAttrMetadata(TF_Operation* oper,
+                                                   const char* attr_name,
+                                                   TF_Status* status);
 
 // Fills in `value` with the value of the attribute `attr_name`.  `value` must
 // point to an array of length at least `max_length` (ideally set to
-// TF_Attr_Metadata.total_size from TF_OperationGetAttrMetadata(oper,
+// TF_AttrMetadata.total_size from TF_OperationGetAttrMetadata(oper,
 // attr_name)).
 extern void TF_OperationGetAttrString(TF_Operation* oper, const char* attr_name,
                                       void* value, int max_length,
@@ -600,8 +601,8 @@ extern void TF_OperationGetAttrString(TF_Operation* oper, const char* attr_name,
 //
 // The elements of values will point to addresses in `storage` which must be at
 // least `storage_size` bytes large.  Ideally, max_values would be set to
-// TF_Attr_Metadata.list_size and `storage` would be at least
-// TF_Attr_Metadata.total_size, obtained from TF_OperationGetAttrMetadata(oper,
+// TF_AttrMetadata.list_size and `storage` would be at least
+// TF_AttrMetadata.total_size, obtained from TF_OperationGetAttrMetadata(oper,
 // attr_name).
 //
 // Fails if storage_size is too small to hold the requested number of strings.
@@ -616,7 +617,7 @@ extern void TF_OperationGetAttrInt(TF_Operation* oper, const char* attr_name,
 
 // Fills in `values` with the value of the attribute `attr_name` of `oper`.
 // `values` must point to an array of length at least `max_values` (ideally set
-// TF_Attr_Metadata.list_size from TF_OperationGetAttrMetadata(oper,
+// TF_AttrMetadata.list_size from TF_OperationGetAttrMetadata(oper,
 // attr_name)).
 extern void TF_OperationGetAttrIntList(TF_Operation* oper,
                                        const char* attr_name, int64_t* values,
@@ -627,7 +628,7 @@ extern void TF_OperationGetAttrFloat(TF_Operation* oper, const char* attr_name,
 
 // Fills in `values` with the value of the attribute `attr_name` of `oper`.
 // `values` must point to an array of length at least `max_values` (ideally set
-// to TF_Attr_Metadata.list_size from TF_OperationGetAttrMetadata(oper,
+// to TF_AttrMetadata.list_size from TF_OperationGetAttrMetadata(oper,
 // attr_name)).
 extern void TF_OperationGetAttrFloatList(TF_Operation* oper,
                                          const char* attr_name, float* values,
@@ -638,7 +639,7 @@ extern void TF_OperationGetAttrBool(TF_Operation* oper, const char* attr_name,
 
 // Fills in `values` with the value of the attribute `attr_name` of `oper`.
 // `values` must point to an array of length at least `max_values` (ideally set
-// to TF_Attr_Metadata.list_size from TF_OperationGetAttrMetadata(oper,
+// to TF_AttrMetadata.list_size from TF_OperationGetAttrMetadata(oper,
 // attr_name)).
 extern void TF_OperationGetAttrBoolList(TF_Operation* oper,
                                         const char* attr_name,
@@ -650,7 +651,7 @@ extern void TF_OperationGetAttrType(TF_Operation* oper, const char* attr_name,
 
 // Fills in `values` with the value of the attribute `attr_name` of `oper`.
 // `values` must point to an array of length at least `max_values` (ideally set
-// to TF_Attr_Metadata.list_size from TF_OperationGetAttrMetadata(oper,
+// to TF_AttrMetadata.list_size from TF_OperationGetAttrMetadata(oper,
 // attr_name)).
 extern void TF_OperationGetAttrTypeList(TF_Operation* oper,
                                         const char* attr_name,
@@ -672,8 +673,8 @@ extern void TF_OperationGetAttrShape(TF_Operation* oper, const char* attr_name,
 //
 // The elements of `dims` will point to addresses in `storage` which must be
 // large enough to hold at least `storage_size` int64_ts.  Ideally, `num_shapes`
-// would be set to TF_Attr_Metadata.list_size and `storage_size` would be set to
-// TF_Attr_Metadata.total_size from TF_OperationGetAttrMetadata(oper,
+// would be set to TF_AttrMetadata.list_size and `storage_size` would be set to
+// TF_AttrMetadata.total_size from TF_OperationGetAttrMetadata(oper,
 // attr_name).
 //
 // Fails if storage_size is insufficient to hold the requested shapes.
@@ -692,7 +693,7 @@ extern void TF_OperationGetAttrTensorShapeProto(TF_Operation* oper,
 
 // Fills in `values` with binary-serialized TensorShapeProto values of the
 // attribute `attr_name` of `oper`. `values` must point to an array of length at
-// least `num_values` (ideally set to TF_Attr_Metadata.list_size from
+// least `num_values` (ideally set to TF_AttrMetadata.list_size from
 // TF_OperationGetAttrMetadata(oper, attr_name)).
 extern void TF_OperationGetAttrTensorShapeProtoList(TF_Operation* oper,
                                                     const char* attr_name,
@@ -709,7 +710,7 @@ extern void TF_OperationGetAttrTensor(TF_Operation* oper, const char* attr_name,
 
 // Fills in `values` with the TF_Tensor values of the attribute `attr_name` of
 // `oper`. `values` must point to an array of TF_Tensor* of length at least
-// `max_values` (ideally set to TF_Attr_Metadata.list_size from
+// `max_values` (ideally set to TF_AttrMetadata.list_size from
 // TF_OperationGetAttrMetadata(oper, attr_name)).
 //
 // The caller takes ownership of all the non-null TF_Tensor* entries in `values`
@@ -739,19 +740,35 @@ extern TF_Operation* TF_GraphOperationByName(TF_Graph* graph,
 // }
 extern TF_Operation* TF_GraphNextOperation(TF_Graph* graph, size_t* pos);
 
-// Note: The following two functions may fail on very large protos in the
-// future.
-
+// Write out a serialized representation of `graph` (as a GraphDef protocol
+// message) to `output_graph_def` (allocated by TF_NewBuffer()).
+//
+// May fail on very large graphs in the future.
 extern void TF_GraphToGraphDef(TF_Graph* graph, TF_Buffer* output_graph_def,
                                TF_Status* status);
+
+// TF_ImportGraphDefOptions holds options that can be passed to
+// TF_GraphImportGraphDef.
+typedef struct TF_ImportGraphDefOptions TF_ImportGraphDefOptions;
+
+extern TF_ImportGraphDefOptions* TF_NewImportGraphDefOptions();
+extern void TF_DeleteImportGraphDefOptions(TF_ImportGraphDefOptions* opts);
+
+// Set the prefix to be prepended to the names of nodes in `graph_def` that will
+// be imported into `graph`.
+extern void TF_ImportGraphDefOptionsSetPrefix(TF_ImportGraphDefOptions* opts,
+                                              const char* prefix);
+
+// Import the graph serialized in `graph_def` into `graph`.
+extern void TF_GraphImportGraphDef(TF_Graph* graph, const TF_Buffer* graph_def,
+                                   const TF_ImportGraphDefOptions* options,
+                                   TF_Status* status);
+
+// Note: The following function may fail on very large protos in the future.
 
 extern void TF_OperationToNodeDef(TF_Operation* oper,
                                   TF_Buffer* output_node_def,
                                   TF_Status* status);
-
-// TODO(cwhipkey): Query shape for operation outputs.
-
-// TODO(ashankar): Import GraphDef into TF_Graph.
 
 // TODO(andydavis): Function to add gradients to a graph.
 
@@ -948,8 +965,6 @@ typedef struct TF_Library TF_Library;
 // Pass "library_filename" to a platform-specific mechanism for dynamically
 // loading a library. The rules for determining the exact location of the
 // library are platform-specific and are not documented here.
-// Expects the symbols "RegisterOps", "RegisterKernels", and "GetOpList", to be
-// defined in the library.
 //
 // On success, place OK in status and return the newly created library handle.
 // The caller owns the library handle.

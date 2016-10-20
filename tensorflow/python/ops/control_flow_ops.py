@@ -1608,6 +1608,23 @@ class CondContext(ControlFlowContext):
     if self._outer_context or not IsLoopExit(op):
       op.graph.prevent_fetching(op)
 
+  def _ProcessOutputTensor(self, val):
+    """Process an output tensor of a conditional branch."""
+    real_val = val
+    if val.name not in self._values:
+      # Handle the special case of lambda: x
+      self._values.add(val.name)
+      if self._outer_context:
+        real_val = self._outer_context.AddValue(val)
+        self._values.add(real_val.name)
+      real_val = _SwitchRefOrTensor(real_val, self._pred)[self._branch]
+      self._external_values[val.name] = real_val
+    else:
+      external_val = self._external_values.get(val.name)
+      if external_val is not None:
+        real_val = external_val
+    return real_val
+
   def BuildCondBranch(self, fn):
     """Add the subgraph defined by fn() to the graph."""
     r = fn()
@@ -1623,18 +1640,20 @@ class CondContext(ControlFlowContext):
         if isinstance(v, ops.Operation):
           # Use pivot as the proxy for this op.
           real_v = with_dependencies([v], self._pivot)
-        elif v.name not in self._values:
-          # Handle the special case of lambda: x
-          self._values.add(v.name)
-          if self._outer_context:
-            real_v = self._outer_context.AddValue(v)
-            self._values.add(real_v.name)
-          real_v = _SwitchRefOrTensor(real_v, self._pred)[self._branch]
-          self._external_values[v.name] = real_v
         else:
-          external_v = self._external_values.get(v.name)
-          if external_v is not None:
-            real_v = external_v
+          if isinstance(v, (ops.IndexedSlices, ops.SparseTensor)):
+            values = self._ProcessOutputTensor(v.values)
+            indices = self._ProcessOutputTensor(v.indices)
+            if isinstance(v, ops.IndexedSlices):
+              dense_shape = v.dense_shape
+              if dense_shape is not None:
+                dense_shape = self._ProcessOutputTensor(dense_shape)
+              real_v = ops.IndexedSlices(values, indices, dense_shape)
+            else:
+              dense_shape = self._ProcessOutputTensor(v.shape)
+              real_v = ops.SparseTensor(indices, values, dense_shape)
+          else:
+            real_v = self._ProcessOutputTensor(v)
         result.append(real_v)
     return original_r, result
 
@@ -1653,7 +1672,7 @@ def cond(pred, fn1, fn2, name=None):
   result = tf.cond(x < y, lambda: tf.add(x, z), lambda: tf.square(y))
   ```
 
-  If x < y, the tf.add operation will be executed and tf.square
+  If x < y, the `tf.add` operation will be executed and tf.square
   operation will not be executed. Since z is needed for at least one
   branch of the cond, the tf.mul operation is always executed, unconditionally.
   Although this behavior is consistent with the dataflow model of TensorFlow,
@@ -1726,6 +1745,8 @@ def cond(pred, fn1, fn2, name=None):
     for x, y in zip(res_f, res_t):
       assert ((isinstance(x, ops.IndexedSlices) and
                isinstance(y, ops.IndexedSlices)) or
+              (isinstance(x, ops.SparseTensor) and
+               isinstance(y, ops.SparseTensor)) or
               (isinstance(x, ops.Tensor) and isinstance(y, ops.Tensor)))
       val_x = x if isinstance(x, ops.Tensor) else x.values
       val_y = y if isinstance(y, ops.Tensor) else y.values
@@ -2398,10 +2419,10 @@ def while_loop(cond, body, loop_vars, shape_invariants=None,
   """Repeat `body` while the condition `cond` is true.
 
   `cond` is a callable returning a boolean scalar tensor. `body` is a callable
-  returning a (possibly nested) tuple or list of tensors of the same
+  returning a (possibly nested) tuple, namedtuple or list of tensors of the same
   arity (length and structure) and types as `loop_vars`. `loop_vars` is a
-  (possibly nested) tuple or list of tensors that is passed to both `cond`
-  and `body`. `cond` and `body` both take as many arguments as there are
+  (possibly nested) tuple, namedtuple or list of tensors that is passed to both
+  `cond` and `body`. `cond` and `body` both take as many arguments as there are
   `loop_vars`.
 
   While `cond` evaluates to true, `body` is executed.
@@ -2454,8 +2475,8 @@ def while_loop(cond, body, loop_vars, shape_invariants=None,
   Args:
     cond: A callable that represents the termination condition of the loop.
     body: A callable that represents the loop body.
-    loop_vars: A (possibly nested) tuple or list of numpy array, `Tensor`,
-      and `TensorArray` objects.
+    loop_vars: A (possibly nested) tuple, namedtuple or list of numpy array,
+      `Tensor`, and `TensorArray` objects.
     shape_invariants: The shape invariants for the loop variables.
     parallel_iterations: The number of iterations allowed to run in parallel.
     back_prop: Whether backprop is enabled for this while loop.
@@ -2480,12 +2501,14 @@ def while_loop(cond, body, loop_vars, shape_invariants=None,
     r = tf.while_loop(c, b, [i])
     ```
 
-  Example with nesting:
+  Example with nesting and a namedtuple:
 
     ```python
-    ijk_0 = (tf.constant(0), (tf.constant(1), tf.constant(2)))
-    c = lambda i, (j, k): i < 10
-    b = lambda i, (j, k): (i + 1, ((j + k), (j - k)))
+    import collections
+    Pair = collections.namedtuple('Pair', 'j, k')
+    ijk_0 = (tf.constant(0), Pair(tf.constant(1), tf.constant(2)))
+    c = lambda i, p: i < 10
+    b = lambda i, p: (i + 1, Pair((p.j + p.k), (p.j - p.k)))
     ijk_final = tf.while_loop(c, b, ijk_0)
     ```
 
@@ -2723,9 +2746,9 @@ def case(pred_fn_pairs, default, exclusive=False, name="case"):
   in `pred_fn_pairs` as well as `default` should return the same number
   and types of tensors.
 
-  If `exclusive==True`, all predicates are evaluated, and a logging operation
-  with an error is returned if more than one of the predicates evaluates to
-  True. If `exclusive==False`, execution stops are the first predicate which
+  If `exclusive==True`, all predicates are evaluated, and an exception is
+  thrown if more than one of the predicates evaluates to `True`.
+  If `exclusive==False`, execution stops are the first predicate which
   evaluates to True, and the tensors generated by the corresponding function
   are returned immediately. If none of the predicates evaluate to True, this
   operation returns the tensors generated by `default`.
@@ -2769,7 +2792,7 @@ def case(pred_fn_pairs, default, exclusive=False, name="case"):
     pred_fn_pairs: Dict or list of pairs of a boolean scalar tensor and a
                    callable which returns a list of tensors.
     default: A callable that returns a list of tensors.
-    exclusive: True iff more than one predicate is allowed to evaluate to True.
+    exclusive: True iff at most one predicate is allowed to evaluate to `True`.
     name: A name for this operation (optional).
 
   Returns:

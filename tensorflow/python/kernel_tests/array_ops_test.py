@@ -182,10 +182,23 @@ class OperatorShapeTest(test_util.TensorFlowTestCase):
     scalar_expanded = array_ops.expand_dims(scalar, [0])
     self.assertEqual(scalar_expanded.get_shape(), (1,))
 
-  def testSqueeze(self):
+  def testSqueezeScalar(self):
     scalar = "hello"
     scalar_squeezed = array_ops.squeeze(scalar, ())
     self.assertEqual(scalar_squeezed.get_shape(), ())
+
+  def testSqueezeMatrix(self):
+    matrix = [[1, 2, 3]]
+    matrix_squeezed = array_ops.squeeze(matrix, [0])
+    self.assertEqual(matrix_squeezed.get_shape(), (3))
+
+    with self.assertRaises(ValueError):
+      matrix_squeezed = array_ops.squeeze(matrix, [1])
+
+  def testSqueezeScalarDim(self):
+    matrix = [[1, 2, 3]]
+    matrix_squeezed = array_ops.squeeze(matrix, 0)
+    self.assertEqual(matrix_squeezed.get_shape(), (3))
 
 
 class ReverseTest(test_util.TensorFlowTestCase):
@@ -232,37 +245,41 @@ class ReverseTest(test_util.TensorFlowTestCase):
 
 class MeshgridTest(test_util.TensorFlowTestCase):
 
-  def _compare(self, n, np_dtype, use_gpu):
-    inputs = []
-    for i in range(n):
-      x = np.linspace(-10, 10, 5).astype(np_dtype)
-      if np_dtype in (np.complex64, np.complex128):
-        x += 1j
-      inputs.append(x)
+  def _compareDiff(self, x, y, use_gpu):
+    for index in ('ij', 'xy'):
+      numpy_out = np.meshgrid(x, y, indexing=index)
+      tf_out = array_ops.meshgrid(x, y, indexing=index)
+      with self.test_session(use_gpu=use_gpu):
+        for xx, yy in zip(numpy_out, tf_out):
+          self.assertAllEqual(xx, yy.eval())
 
-    numpy_out = np.meshgrid(*inputs)
-    with self.test_session(use_gpu=use_gpu):
-      tf_out = array_ops.meshgrid(*inputs)
-      for X, _X in zip(numpy_out, tf_out):
-        self.assertAllEqual(X, _X.eval())
+  def _compareDiffType(self, n, np_dtype, use_gpu):
+    inputs = []
+    for index in ('ij', 'xy'):
+      for i in range(n):
+        x = np.linspace(-10, 10, 5).astype(np_dtype)
+        if np_dtype in (np.complex64, np.complex128):
+          x += 1j
+        inputs.append(x)
+      numpy_out = np.meshgrid(*inputs, indexing=index)
+      with self.test_session(use_gpu=use_gpu):
+        tf_out = array_ops.meshgrid(*inputs, indexing=index)
+        for X, _X in zip(numpy_out, tf_out):
+          self.assertAllEqual(X, _X.eval())
 
   def testCompare(self):
     for t in (np.float16, np.float32, np.float64, np.int32, np.int64,
             np.complex64, np.complex128):
-      # Don't test the one-dimensional case, as
-      # old numpy versions don't support it
-      self._compare(2, t, False)
-      self._compare(3, t, False)
-      self._compare(4, t, False)
-      self._compare(5, t, False)
+      self._compareDiffType(2, t, False)
+      self._compareDiffType(3, t, False)
 
-    # Test for inputs with rank not equal to 1
-    x = [[1, 1], [1, 1]]
-    with self.assertRaisesRegexp(errors.InvalidArgumentError,
-                                 "needs to have rank 1"):
-      with self.test_session():
-        X, _ = array_ops.meshgrid(x, x)
-        X.eval()
+      x = [1, 2, 3]
+      y = [4, 5]
+
+      a = [[1, 1], [1, 1]]
+
+      self._compareDiff(x, y, False)
+      self._compareDiff(x, a, False)
 
 
 class StridedSliceChecker(object):
@@ -490,6 +507,21 @@ class StridedSliceShapeTest(test_util.TensorFlowTestCase):
         self.tensorShapeEqual(a[::-1, :, tf.newaxis, ::-2],
                               tensor_shape.TensorShape([5, None, 1, 4]))
 
+  def testTensorValuedIndexShape(self):
+    for use_gpu in [False, True]:
+      with self.test_session(use_gpu=use_gpu):
+        defined_shape_tensor = tf.placeholder(tf.float32, shape=(5, 3, 7))
+        index_value = tf.placeholder(tf.int32, shape=())
+        a = StridedSliceShapeChecker(defined_shape_tensor)
+        self.tensorShapeEqual(a[index_value], tensor_shape.TensorShape([3, 7]))
+        self.tensorShapeEqual(a[index_value, ::-1],
+                              tensor_shape.TensorShape([3, 7]))
+        self.tensorShapeEqual(a[index_value, ::-2],
+                              tensor_shape.TensorShape([2, 7]))
+        other_scalar = tf.placeholder(tf.int32, shape=())
+        self.tensorShapeEqual(a[index_value, other_scalar:2],
+                              tensor_shape.TensorShape([None, 7]))
+
 
 class GradSliceChecker(object):
   """Tests that we can compute a gradient for var^2."""
@@ -548,6 +580,16 @@ class StridedSliceGradTest(test_util.TensorFlowTestCase):
           _ = grad[:, -200, :]
         with self.assertRaisesRegexp(ValueError, "out of bounds"):
           _ = grad[:, 200, :]
+
+  def testGradientZero(self):
+    for use_gpu in [False, True]:
+      with self.test_session(use_gpu=use_gpu) as sess:
+        var = tf.Variable(8)
+        init = tf.initialize_all_variables()
+        sess.run(init)
+        grad = GradSliceChecker(self, sess, var,
+                                np.array(8))
+        _ = grad[tuple()]
 
 
 class StridedSliceGradTypeTest(test_util.TensorFlowTestCase):
@@ -743,6 +785,30 @@ class ShapeSizeRankTest(test_util.TensorFlowTestCase):
       self.assertEqual(4, tf.size(sp).eval())
       self.assertEqual(2, tf.rank(sp).eval())
 
+
+class SequenceMaskTest(test_util.TensorFlowTestCase):
+
+  def testExceptions(self):
+    with self.test_session():
+      with self.assertRaisesRegexp(ValueError, "lengths must be 1D"):
+        tf.sequence_mask([[10, 20]], [10, 20])
+      with self.assertRaisesRegexp(ValueError, "maxlen must be scalar"):
+        tf.sequence_mask([10, 20], [10, 20])
+
+  def testNormal(self):
+    with self.test_session():
+      res = tf.sequence_mask(tf.constant([1, 3, 2]), 5)
+      self.assertAllEqual(res.get_shape(), [3, 5])
+      self.assertAllEqual(res.eval(), [[True, False, False, False, False],
+                                       [True, True, True, False, False],
+                                       [True, True, False, False, False]])
+
+      # test dtype and default maxlen:
+      res = tf.sequence_mask(tf.constant([0, 1, 4]), dtype=tf.float32)
+      self.assertAllEqual(res.get_shape().as_list(), [3, None])
+      self.assertAllEqual(res.eval(), [[0.0, 0.0, 0.0, 0.0],
+                                       [1.0, 0.0, 0.0, 0.0],
+                                       [1.0, 1.0, 1.0, 1.0]])
 
 if __name__ == "__main__":
   tf.test.main()

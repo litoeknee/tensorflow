@@ -97,6 +97,10 @@ message GraphOptions {
   // no cost model.
   int64 build_cost_model = 4;
 
+  // The number of steps to skip before collecting statistics for the
+  // cost model.
+  int64 build_cost_model_after = 9;
+
   // Annotate each Node with Op output shape data, to the extent it can
   // be statically inferred.
   bool infer_shapes = 5;
@@ -112,6 +116,10 @@ message GraphOptions {
 
   // If true, transfer float values between processes as bfloat16.
   bool enable_bfloat16_sendrecv = 7;
+
+  // If > 0, record a timeline every this many steps.
+  // EXPERIMENTAL: This currently has no effect in MasterSession.
+  int32 timeline_step = 8;
 };
 
 message ThreadPoolOptionProto {

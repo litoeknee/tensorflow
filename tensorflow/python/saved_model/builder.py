@@ -26,8 +26,9 @@ import os
 
 from google.protobuf.any_pb2 import Any
 
-from tensorflow.contrib.session_bundle import manifest_pb2
+from tensorflow.core.protobuf import meta_graph_pb2
 from tensorflow.core.protobuf import saved_model_pb2
+from tensorflow.core.protobuf import saver_pb2
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
 from tensorflow.python.lib.io import file_io
@@ -67,7 +68,7 @@ class SavedModelBuilder(object):
     builder.add_meta_graph_and_variables(sess,
                                     ["foo-tag"],
                                     signature_def_map=foo_signatures,
-                                    asset_collection=foo_assets)
+                                    assets_collection=foo_assets)
   ...
 
   with tf.Session(graph=tf.Graph()) as sess:
@@ -123,12 +124,12 @@ class SavedModelBuilder(object):
 
     Args:
       asset_filename: The filename of the asset to be added.
-      asset_tensor: The asset tensor used to populate the tensor binding of the
+      asset_tensor: The asset tensor used to populate the tensor info of the
           asset proto.
     """
-    asset_proto = manifest_pb2.AssetFile()
+    asset_proto = meta_graph_pb2.AssetFileDef()
     asset_proto.filename = asset_filename
-    asset_proto.tensor_binding.tensor_name = asset_tensor.name
+    asset_proto.tensor_info.name = asset_tensor.name
 
     asset_any_proto = Any()
     asset_any_proto.Pack(asset_proto)
@@ -252,7 +253,10 @@ class SavedModelBuilder(object):
     # Save asset files, if any.
     self._save_assets(assets_collection)
 
-    saver = tf_saver.Saver(variables.all_variables())
+    saver = tf_saver.Saver(
+        variables.all_variables(),
+        sharded=True,
+        write_version=saver_pb2.SaverDef.V2)
     meta_graph_def = saver.export_meta_graph()
 
     # Tag the meta graph def and add it to the SavedModel.
@@ -286,13 +290,23 @@ class SavedModelBuilder(object):
     # Save asset files and write them to disk, if any.
     self._save_and_write_assets(assets_collection)
 
-    export_path = os.path.join(
+    # Create the variables sub-directory, if it does not exist.
+    variables_dir = os.path.join(
         compat.as_text(self._export_dir),
+        compat.as_text(constants.VARIABLES_DIRECTORY))
+    if not file_io.file_exists(variables_dir):
+      file_io.recursive_create_dir(variables_dir)
+
+    variables_path = os.path.join(
+        compat.as_text(variables_dir),
         compat.as_text(constants.VARIABLES_FILENAME))
 
     # Save the variables and export meta graph def.
-    saver = tf_saver.Saver(variables.all_variables())
-    saver.save(sess, export_path, write_meta_graph=False)
+    saver = tf_saver.Saver(
+        variables.all_variables(),
+        sharded=True,
+        write_version=saver_pb2.SaverDef.V2)
+    saver.save(sess, variables_path, write_meta_graph=False)
     meta_graph_def = saver.export_meta_graph()
 
     # Tag the meta graph def and add it to the SavedModel.

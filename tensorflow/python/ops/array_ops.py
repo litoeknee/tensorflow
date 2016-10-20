@@ -25,6 +25,7 @@ types in your graph.
 @@to_int32
 @@to_int64
 @@cast
+@@bitcast
 @@saturate_cast
 
 ## Shapes and Shaping
@@ -33,6 +34,7 @@ TensorFlow provides several operations that you can use to determine the shape
 of a tensor and change the shape of a tensor.
 
 @@shape
+@@shape_n
 @@size
 @@rank
 @@reshape
@@ -57,16 +59,24 @@ or join multiple tensors together.
 @@reverse
 @@transpose
 @@extract_image_patches
+@@space_to_batch_nd
 @@space_to_batch
+@@required_space_to_batch_paddings
+@@batch_to_space_nd
 @@batch_to_space
 @@space_to_depth
 @@depth_to_space
 @@gather
 @@gather_nd
+@@unique_with_counts
 @@dynamic_partition
 @@dynamic_stitch
 @@boolean_mask
 @@one_hot
+@@sequence_mask
+@@dequantize
+@@quantize_v2
+@@quantized_concat
 
 """
 from __future__ import absolute_import
@@ -85,7 +95,6 @@ from tensorflow.python.framework import tensor_util
 # 'Constant' gets imported in the module 'array_ops'.
 from tensorflow.python.framework.constant_op import constant
 from tensorflow.python.ops import gen_array_ops
-from tensorflow.python.ops import gen_logging_ops
 from tensorflow.python.ops import gen_math_ops
 # go/tf-wildcard-import
 # pylint: disable=wildcard-import
@@ -122,7 +131,7 @@ def shape(input, name=None, out_type=dtypes.int32):
     input: A `Tensor` or `SparseTensor`.
     name: A name for the operation (optional).
     out_type: (Optional) The specified output type of the operation
-      (`int32` or `int64`). Defaults to tf.int32.
+      (`int32` or `int64`). Defaults to `tf.int32`.
 
   Returns:
     A `Tensor` of type `out_type`.
@@ -269,7 +278,7 @@ def _SliceHelper(tensor, slice_spec, var=None):
 
   Some useful examples:
 
-  ```
+  ```python
   # strip leading and trailing 2 elements
   foo = tf.constant([1,2,3,4,5,6])
   print(foo[2:-2].eval()) # => [3,4]
@@ -352,8 +361,7 @@ def _SliceHelper(tensor, slice_spec, var=None):
       shrink_axis_mask |= (1 << index)
     index += 1
 
-  # pack possibly involves often involves no tensors, so we must use op_scope
-  # correct graph
+  # pack possibly involves no tensors, so we must use op_scope correct graph.
   with ops.name_scope(None, "strided_slice",
                       [tensor] + begin + end + strides) as name:
     if begin:
@@ -401,7 +409,7 @@ def slice(input_, begin, size, name=None):
 
   For example:
 
-  ```
+  ```python
   # 'input' is [[[1, 1, 1], [2, 2, 2]],
   #             [[3, 3, 3], [4, 4, 4]],
   #             [[5, 5, 5], [6, 6, 6]]]
@@ -490,7 +498,7 @@ def strided_slice(input_,
   `strides` entries must be non-zero.
 
 
-  ```
+  ```python
   # 'input' is [[[1, 1, 1], [2, 2, 2]],
   #             [[3, 3, 3], [4, 4, 4]],
   #             [[5, 5, 5], [6, 6, 6]]]
@@ -511,7 +519,7 @@ def strided_slice(input_,
     ellipsis_mask: An `int32` mask.
     new_axis_mask: An `int32` mask.
     shrink_axis_mask: An `int32` mask.
-    var: The variable coresponding to `input_` or None
+    var: The variable corresponding to `input_` or None
     name: A name for the operation (optional).
 
   Returns:
@@ -1491,9 +1499,10 @@ def meshgrid(*args, **kwargs):
   Returns:
     outputs: A list of N `Tensor`s with rank N
   """
+
   indexing = kwargs.pop("indexing", "xy")
   name = kwargs.pop("name", "meshgrid")
-  if len(kwargs) > 0:
+  if kwargs:
     key = list(kwargs.keys())[0]
     raise TypeError("'{}' is an invalid keyword argument "
                     "for this function".format(key))
@@ -1502,35 +1511,26 @@ def meshgrid(*args, **kwargs):
     raise ValueError("indexing parameter must be either 'xy' or 'ij'")
 
   with ops.name_scope(name, "meshgrid", args) as name:
-    num_inputs = len(args)
-    ones = (1,) * num_inputs
-
-    # Cannot import Assert from control_flow_ops, so we incur the
-    # penalty of possibly copying from GPU to CPU regardless of the
-    # equality of the predicate.
-    asserts = [gen_logging_ops._assert(
-                 gen_math_ops.equal(rank(x), 1),
-                 ["Input %d needs to have rank 1: " % i, rank(x)],
-               ) for i, x in enumerate(args)]
+    ndim = len(args)
+    s0 = (1,) * ndim
 
     # Prepare reshape by inserting dimensions with size 1 where needed
-    shapes = [ones[:i] + (-1,) + ones[i + 1:] for i in range(num_inputs)]
+    output = []
+    for i, x in enumerate(args):
+      output.append(reshape(pack(x), (s0[:i] + (-1,) + s0[i + 1::])) )
     # Create parameters for broadcasting each tensor to the full size
-    sizes = [size(x) for x in args]
-    bcast = [sizes[:i] + [1] + sizes[i + 1:] for i in range(num_inputs)]
+    shapes = [size(x) for x in args]
 
-    # By default, the numpy version swaps the instructions
-    # for the first and second dimension
-    if indexing == "xy" and num_inputs > 1:
+    output_dtype = ops.convert_to_tensor(args[0]).dtype.base_dtype
+
+    if indexing == "xy" and ndim > 1:
+      output[0] = reshape(output[0], (1, -1) + (1,)*(ndim - 2))
+      output[1] = reshape(output[1], (-1, 1) + (1,)*(ndim - 2))
       shapes[0], shapes[1] = shapes[1], shapes[0]
-      bcast[0], bcast[1] = bcast[1], bcast[0]
 
-    results = []
-    with ops.control_dependencies(asserts):
-      for a, r, e in zip(args, shapes, bcast):
-        results.append(tile(reshape(a, r), e))
-
-    return results
+    # TODO: improve performance with a broadcast
+    mult_fact = ones(shapes, output_dtype)
+    return [x * mult_fact for x in output]
 
 
 ops.RegisterShape("Placeholder")(common_shapes.call_cpp_shape_fn)
@@ -1909,14 +1909,131 @@ def _QuantizeDequantizeShape(op):
 ops.RegisterShape("ExtractImagePatches")(common_shapes.call_cpp_shape_fn)
 
 
+def required_space_to_batch_paddings(input_shape,
+                                     block_shape,
+                                     base_paddings=None,
+                                     name=None):
+  """Calculate padding required to make block_shape divide input_shape.
+
+  This function can be used to calculate a suitable paddings argument for use
+  with space_to_batch_nd and batch_to_space_nd.
+
+  Args:
+    input_shape: int32 Tensor of shape [N].
+    block_shape: int32 Tensor of shape [N].
+    base_paddings: Optional int32 Tensor of shape [N, 2].  Specifies the minimum
+      amount of padding to use.  All elements must be >= 0.  If not specified,
+      defaults to 0.
+    name: string.  Optional name prefix.
+
+  Returns:
+    (paddings, crops), where:
+
+    `paddings` and `crops` are int32 Tensors of rank 2 and shape [N, 2]
+    satisfying:
+
+        paddings[i, 0] = base_paddings[i, 0].
+        0 <= paddings[i, 1] - base_paddings[i, 1] < block_shape[i]
+        (input_shape[i] + paddings[i, 0] + paddings[i, 1]) % block_shape[i] == 0
+
+        crops[i, 0] = 0
+        crops[i, 1] = paddings[i, 1] - base_paddings[i, 1]
+
+  Raises: ValueError if called with incompatible shapes.
+  """
+  with ops.name_scope(name, "required_space_to_batch_paddings",
+                      [input_shape, block_shape]):
+    input_shape = ops.convert_to_tensor(input_shape,
+                                        dtype=dtypes.int32,
+                                        name="input_shape")
+    block_shape = ops.convert_to_tensor(block_shape,
+                                        dtype=dtypes.int32,
+                                        name="block_shape")
+
+    block_shape.get_shape().assert_is_fully_defined()
+    block_shape.get_shape().assert_has_rank(1)
+    num_block_dims = block_shape.get_shape()[0].value
+    if num_block_dims == 0:
+      return zeros([0, 2], dtypes.int32), zeros([0, 2], dtypes.int32)
+
+    input_shape.get_shape().assert_is_compatible_with([num_block_dims])
+
+    if base_paddings is not None:
+      base_paddings = ops.convert_to_tensor(base_paddings,
+                                            dtype=dtypes.int32,
+                                            name="base_paddings")
+      base_paddings.get_shape().assert_is_compatible_with([num_block_dims, 2])
+    else:
+      base_paddings = zeros([num_block_dims, 2], dtypes.int32)
+
+    const_block_shape = tensor_util.constant_value(block_shape)
+    const_input_shape = tensor_util.constant_value(input_shape)
+    const_base_paddings = tensor_util.constant_value(base_paddings)
+    if (const_block_shape is not None and const_input_shape is not None and
+        const_base_paddings is not None):
+      block_shape = const_block_shape
+      input_shape = const_input_shape
+      base_paddings = const_base_paddings
+
+    # Use same expression for both constant and non-constant case.
+    pad_start = base_paddings[:, 0]
+    orig_pad_end = base_paddings[:, 1]
+    full_input_shape = input_shape + pad_start + orig_pad_end
+    pad_end_extra = (block_shape - full_input_shape % block_shape) % block_shape
+    pad_end = orig_pad_end + pad_end_extra
+
+    result_paddings = pack(
+        [[pad_start[i], pad_end[i]] for i in range(num_block_dims)],
+        name="paddings")
+    result_crops = pack(
+        [[0, pad_end_extra[i]] for i in range(num_block_dims)], name="crops")
+    return result_paddings, result_crops
+
+
+def space_to_batch(input, paddings, block_size, name=None):  # pylint: disable=redefined-builtin
+  result = space_to_batch_nd(input,
+                             paddings=paddings,
+                             block_shape=np.array([block_size, block_size],
+                                                  dtype=np.int64),
+                             name=name)
+  result.set_shape(result.get_shape().with_rank(4))
+  return result
+
+
+space_to_batch.__doc__ = gen_array_ops._space_to_batch.__doc__
+
+
+def batch_to_space(input, crops, block_size, name=None):  # pylint: disable=redefined-builtin
+  result = batch_to_space_nd(input,
+                             crops=crops,
+                             block_shape=np.array([block_size, block_size],
+                                                  dtype=np.int64),
+                             name=name)
+  result.set_shape(result.get_shape().with_rank(4))
+  return result
+
+
+batch_to_space.__doc__ = gen_array_ops._batch_to_space.__doc__
+
+
 @ops.RegisterShape("SpaceToBatch")
 def _SpaceToBatchShape(op):
   return common_shapes.call_cpp_shape_fn(op, input_tensors_needed=[1])
 
 
+@ops.RegisterShape("SpaceToBatchND")
+def _SpaceToBatchNDShape(op):
+  return common_shapes.call_cpp_shape_fn(op, input_tensors_needed=[1, 2])
+
+
 @ops.RegisterShape("BatchToSpace")
 def _BatchToSpaceShape(op):
   return common_shapes.call_cpp_shape_fn(op, input_tensors_needed=[1])
+
+
+@ops.RegisterShape("BatchToSpaceND")
+def _BatchToSpaceNDShape(op):
+  return common_shapes.call_cpp_shape_fn(op, input_tensors_needed=[1, 2])
 
 
 ops.RegisterShape("SpaceToDepth")(common_shapes.call_cpp_shape_fn)
@@ -1946,6 +2063,7 @@ def one_hot(indices, depth, on_value=None, off_value=None,
   If `indices` is a scalar the output shape will be a vector of length `depth`
 
   If `indices` is a vector of length `features`, the output shape will be:
+
   ```
     features x depth if axis == -1
     depth x features if axis == 0
@@ -1953,6 +2071,7 @@ def one_hot(indices, depth, on_value=None, off_value=None,
 
   If `indices` is a matrix (batch) with shape `[batch, features]`, the output
   shape will be:
+
   ```
     batch x features x depth if axis == -1
     batch x depth x features if axis == 1
@@ -1962,17 +2081,17 @@ def one_hot(indices, depth, on_value=None, off_value=None,
   If `dtype` is not provided, it will attempt to assume the data type of
   `on_value` or `off_value`, if one or both are passed in. If none of
   `on_value`, `off_value`, or `dtype` are provided, `dtype` will default to the
-  value `tf.float32`
+  value `tf.float32`.
 
-  Note: If a non-numeric data type output is desired (tf.string, tf.bool, etc.),
-  both `on_value` and `off_value` _must_ be provided to `one_hot`
+  Note: If a non-numeric data type output is desired (`tf.string`, `tf.bool`,
+  etc.), both `on_value` and `off_value` _must_ be provided to `one_hot`.
 
   Examples
   =========
 
   Suppose that
 
-  ```
+  ```python
     indices = [0, 2, -1, 1]
     depth = 3
     on_value = 5.0
@@ -1982,7 +2101,7 @@ def one_hot(indices, depth, on_value=None, off_value=None,
 
   Then output is `[4 x 3]`:
 
-  ```
+  ```python
     output =
     [5.0 0.0 0.0]  // one_hot(0)
     [0.0 0.0 5.0]  // one_hot(2)
@@ -1992,7 +2111,7 @@ def one_hot(indices, depth, on_value=None, off_value=None,
 
   Suppose that
 
-  ```
+  ```python
     indices = [[0, 2], [1, -1]]
     depth = 3
     on_value = 1.0
@@ -2002,7 +2121,7 @@ def one_hot(indices, depth, on_value=None, off_value=None,
 
   Then output is `[2 x 2 x 3]`:
 
-  ```
+  ```python
     output =
     [
       [1.0, 0.0, 0.0]  // one_hot(0)
@@ -2015,14 +2134,14 @@ def one_hot(indices, depth, on_value=None, off_value=None,
 
   Using default values for `on_value` and `off_value`:
 
-  ```
+  ```python
     indices = [0, 1, 2]
     depth = 3
   ```
 
   The output will be
 
-  ```
+  ```python
     output =
     [[1., 0., 0.],
      [0., 1., 0.],
@@ -2114,3 +2233,97 @@ def _PlaceholderWithDefaultShape(op):
   # may be *less* precise than `input_shape`.
   input_shape.assert_is_compatible_with(output_shape)
   return [output_shape]
+
+
+def sequence_mask(lengths, maxlen=None, dtype=dtypes.bool, name=None):
+  """Return a mask tensor representing the first N positions of each row.
+
+  Example:
+
+  ```python
+  tf.sequence_mask([1, 3, 2], 5) =
+    [[True, False, False, False, False],
+     [True, True, True, False, False],
+     [True, True, False, False, False]]
+  ```
+
+  Args:
+    lengths: 1D integer tensor, all its values < maxlen.
+    maxlen: scalar integer tensor, maximum length of each row. Default: use
+            maximum over lengths.
+    dtype: output type of the resulting tensor.
+    name: name of the op.
+  Returns:
+    A 2D mask tensor, as shown in the example above, cast to specified dtype.
+
+  Raises:
+    ValueError: if the arguments have invalid rank.
+  """
+  with ops.name_scope(name, "SequenceMask", [lengths, maxlen]):
+    lengths = ops.convert_to_tensor(lengths)
+    if lengths.get_shape().ndims != 1:
+      raise ValueError("lengths must be 1D for sequence_mask")
+
+    if maxlen is None:
+      maxlen = gen_math_ops._max(lengths, [0])
+    else:
+      maxlen = ops.convert_to_tensor(maxlen)
+    if maxlen.get_shape().ndims != 0:
+      raise ValueError("maxlen must be scalar for sequence_mask")
+
+    # The basic idea is to compare a range row vector of size maxlen:
+    # [0, 1, 2, 3, 4]
+    # to length as a matrix with 1 column: [[1], [3], [2]].
+    # Because of broadcasting on both arguments this comparison results
+    # in a matrix of size (len(lengths), maxlen)
+    result = gen_math_ops._range(0, maxlen, 1) < expand_dims(lengths, 1)
+    if dtype is None or result.dtype.base_dtype == dtype.base_dtype:
+      return result
+    else:
+      return gen_math_ops.cast(result, dtype)
+
+
+def squeeze(input, squeeze_dims=None, name=None):
+  # pylint: disable=redefined-builtin
+  """Removes dimensions of size 1 from the shape of a tensor.
+
+  Given a tensor `input`, this operation returns a tensor of the same type with
+  all dimensions of size 1 removed. If you don't want to remove all size 1
+  dimensions, you can remove specific size 1 dimensions by specifying
+  `squeeze_dims`.
+
+  For example:
+
+  ```prettyprint
+  # 't' is a tensor of shape [1, 2, 1, 3, 1, 1]
+  shape(squeeze(t)) ==> [2, 3]
+            ```
+
+  Or, to remove specific size 1 dimensions:
+
+  ```prettyprint
+  # 't' is a tensor of shape [1, 2, 1, 3, 1, 1]
+  shape(squeeze(t, [2, 4])) ==> [1, 2, 3, 1]
+  ```
+
+  Args:
+    input: A `Tensor`. The `input` to squeeze.
+    squeeze_dims: An optional list of `ints`. Defaults to `[]`.
+      If specified, only squeezes the dimensions listed. The dimension
+      index starts at 0. It is an error to squeeze a dimension that is not 1.
+    name: A name for the operation (optional).
+
+  Returns:
+    A `Tensor`. Has the same type as `input`.
+    Contains the same data as `input`, but has one or more dimensions of
+    size 1 removed.
+  """
+  if np.isscalar(squeeze_dims):
+    squeeze_dims = [squeeze_dims]
+  return gen_array_ops._squeeze(input, squeeze_dims, name)
+
+
+# TODO(cwhipkey): Verify and enable shape functions for these.
+ops.RegisterShape("QuantizeV2")(None)
+ops.RegisterShape("QuantizedBatchNormWithGlobalNormalization")(None)
+ops.RegisterShape("QuantizedConcat")(None)

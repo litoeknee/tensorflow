@@ -1,6 +1,10 @@
 ### `tf.contrib.metrics.streaming_recall_at_k(*args, **kwargs)` {#streaming_recall_at_k}
 
-Computes the recall@k of the predictions with respect to dense labels. (deprecated arguments)
+Computes the recall@k of the predictions with respect to dense labels. (deprecated arguments) (deprecated)
+
+THIS FUNCTION IS DEPRECATED. It will be removed after 2016-11-08.
+Instructions for updating:
+Please use `streaming_sparse_recall_at_k`, and reshape labels from [batch_size] to [batch_size, 1].
 
 SOME ARGUMENTS ARE DEPRECATED. They will be removed after 2016-10-19.
 Instructions for updating:
@@ -29,7 +33,7 @@ Instructions for updating:
       `int64`.
     k: The number of top elements to look at for computing recall.
     ignore_mask: An optional, `bool` `Tensor` whose shape matches `predictions`.
-    weights: An optional `Tensor` whose shape matches `predictions`.
+    weights: An optional `Tensor` whose shape is broadcastable to `predictions`.
     metrics_collections: An optional list of collections that `recall_at_k`
       should be added to.
     updates_collections: An optional list of collections `update_op` should be

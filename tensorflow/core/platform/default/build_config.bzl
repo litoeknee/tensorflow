@@ -90,24 +90,49 @@ def tf_proto_library(name, srcs = [], has_services = None,
       visibility = visibility,
   )
 
-def tf_additional_lib_hdrs():
+def tf_additional_lib_hdrs(exclude = []):
+  return select({
+    "//tensorflow:windows" : native.glob([
+        "platform/default/*.h",
+        "platform/windows/*.h",
+        "platform/posix/error.h",
+      ], exclude = exclude),
+    "//conditions:default" : native.glob([
+        "platform/default/*.h",
+        "platform/posix/*.h",
+      ], exclude = exclude),
+  })
+
+def tf_additional_lib_srcs(exclude = []):
+  return select({
+    "//tensorflow:windows" : native.glob([
+        "platform/default/*.cc",
+        "platform/windows/*.cc",
+        "platform/posix/error.cc",
+      ], exclude = exclude),
+    "//conditions:default" : native.glob([
+        "platform/default/*.cc",
+        "platform/posix/*.cc",
+      ], exclude = exclude),
+  })
+
+def tf_additional_minimal_lib_srcs():
   return [
-      "platform/default/*.h",
-      "platform/posix/*.h",
+      "platform/default/integral_types.h",
+      "platform/default/mutex.h",
   ]
 
-def tf_additional_lib_srcs():
+def tf_additional_proto_hdrs():
   return [
-      "platform/default/*.cc",
-      "platform/posix/*.cc",
+      "platform/default/integral_types.h",
+      "platform/default/logging.h",
+      "platform/default/protobuf.h"
   ]
 
 def tf_additional_proto_srcs():
-  return ["platform/default/integral_types.h",
-          "platform/default/logging.h",
-          "platform/default/logging.cc",
-          "platform/default/protobuf.h",
-          "platform/default/protobuf.cc",
+  return [
+      "platform/default/logging.cc",
+      "platform/default/protobuf.cc",
   ]
 
 def tf_additional_stream_executor_srcs():

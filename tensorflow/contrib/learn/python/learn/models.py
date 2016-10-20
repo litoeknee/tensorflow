@@ -117,7 +117,7 @@ def logistic_regression(x,
   Args:
     x: tensor or placeholder for input features,
        shape should be [batch_size, n_features].
-    y: tensor or placeholder for target,
+    y: tensor or placeholder for target (one-hot),
        shape should be [batch_size, n_classes].
     class_weight: tensor, [n_classes], where for each class
                   it has weight of the class. If not provided
@@ -335,7 +335,7 @@ def get_rnn_model(rnn_size, cell_type, num_layers, input_op_fn, bidirectional,
           fw_cell, attn_length=attn_length, attn_size=attn_size,
           attn_vec_size=attn_vec_size, state_is_tuple=False)
         bw_cell = contrib_rnn.AttentionCellWrapper(
-          fw_cell, attn_length=attn_length, attn_size=attn_size,
+          bw_cell, attn_length=attn_length, attn_size=attn_size,
           attn_vec_size=attn_vec_size, state_is_tuple=False)
       rnn_fw_cell = nn.rnn_cell.MultiRNNCell([fw_cell] * num_layers,
                                              state_is_tuple=False)

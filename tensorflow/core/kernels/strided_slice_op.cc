@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ limitations under the License.
 #include "tensorflow/core/kernels/ops_util.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/gtl/array_slice.h"
-#include "tensorflow/core/platform/mem.h"
+#include "tensorflow/core/platform/prefetch.h"
 #include "tensorflow/core/util/strided_slice_op.h"
 
 namespace tensorflow {
@@ -64,7 +64,7 @@ class StridedSliceOp : public OpKernel {
     ShapeReadWriteFromTensorShape wrapped_final_shape(&final_shape);
     OP_REQUIRES_OK(
         context, ValidateStridedSliceOp(
-                     context->input(1), context->input(2), context->input(3),
+                     &context->input(1), &context->input(2), context->input(3),
                      ShapeReadWriteFromTensorShape(&context->input(0).shape()),
                      begin_mask, end_mask, ellipsis_mask, new_axis_mask,
                      shrink_axis_mask, &wrapped_processing_shape,
@@ -194,7 +194,7 @@ class StridedSliceGradOp : public OpKernel {
     OP_REQUIRES_OK(
         context,
         ValidateStridedSliceOp(
-            context->input(1), context->input(2), context->input(3),
+            &context->input(1), &context->input(2), context->input(3),
             ShapeReadWriteFromTensorShape(&input_shape), begin_mask, end_mask,
             ellipsis_mask, new_axis_mask, shrink_axis_mask,
             &wrapped_processing_shape, &wrapped_final_shape, &is_identity,
@@ -213,6 +213,12 @@ class StridedSliceGradOp : public OpKernel {
     const int processing_dims = processing_shape.dims();
     Tensor* result = nullptr;
     OP_REQUIRES_OK(context, context->allocate_output(0, input_shape, &result));
+
+    if (processing_shape.dims() == 0) {
+      auto in = context->input(4);
+      CHECK(result->CopyFrom(in, processing_shape));
+      return;
+    }
 
 #define HANDLE_DIM(NDIM)                                                      \
   if (processing_dims == NDIM) {                                              \
@@ -267,7 +273,7 @@ class StridedSliceAssignOp : public OpKernel {
     OP_REQUIRES_OK(
         context,
         ValidateStridedSliceOp(
-            context->input(1), context->input(2), context->input(3),
+            &context->input(1), &context->input(2), context->input(3),
             ShapeReadWriteFromTensorShape(&old_lhs.shape()), begin_mask,
             end_mask, ellipsis_mask, new_axis_mask, shrink_axis_mask,
             &wrapped_processing_shape, &wrapped_final_shape, &is_identity,
@@ -388,6 +394,17 @@ REGISTER_KERNEL_BUILDER(Name("StridedSlice")
                             .HostMemory("strides")
                             .HostMemory("output"),
                         StridedSliceOp<CPUDevice, int32>);
+REGISTER_KERNEL_BUILDER(Name("StridedSliceGrad")
+                            .Device(DEVICE_GPU)
+                            .TypeConstraint<int32>("T")
+                            .TypeConstraint<int32>("Index")
+                            .HostMemory("shape")
+                            .HostMemory("begin")
+                            .HostMemory("end")
+                            .HostMemory("strides")
+                            .HostMemory("dy")
+                            .HostMemory("output"),
+                        StridedSliceGradOp<CPUDevice, int32>);
 
 #undef REGISTER_GPU
 

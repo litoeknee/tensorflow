@@ -41,7 +41,9 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
+#if GOOGLE_CUDA
 typedef Eigen::GpuDevice GPUDevice;
+#endif  // GOOGLE_CUDA
 
 namespace tensorflow {
 
@@ -517,20 +519,13 @@ class TensorArrayPackOrGatherOp : public OpKernel {
           new ConstMatrix(value_t->shaped<T, 2>({1, value_t->NumElements()})));
     }
 
+#if GOOGLE_CUDA
     if (std::is_same<Device, GPUDevice>::value) {
-      // Switching indexing to int64 might cause performance issues.
-      // Hence, we keep int32 indexing in the GPU kernel unless we need to
-      // switch to int64.
-      if (output_shape.num_elements() < std::numeric_limits<int32>::max()) {
-        ConcatGPU32<T>(ctx->eigen_gpu_device(), input_tensors_flat,
-                       &output_flat);
-      } else {
-        ConcatGPU64<T>(ctx->eigen_gpu_device(), input_tensors_flat,
-                       &output_flat);
-      }
-    } else {
-      ConcatCPU<T>(ctx->device(), input_tensors_flat, &output_flat);
+      ConcatGPU<T>(ctx, input_tensors_flat, output_tensor, &output_flat);
+      return;
     }
+#endif  // GOOGLE_CUDA
+    ConcatCPU<T>(ctx->device(), input_tensors_flat, &output_flat);
   }
 
  private:
@@ -716,20 +711,13 @@ class TensorArrayConcatOp : public OpKernel {
     if (output_shape.num_elements() > 0) {
       auto output_flat =
           output_tensor->shaped<T, 2>({1, output_shape.num_elements()});
+#if GOOGLE_CUDA
       if (std::is_same<Device, GPUDevice>::value) {
-        // Switching indexing to int64 might cause performance issues.
-        // Hence, we keep int32 indexing in the GPU kernel unless we need to
-        // switch to int64.
-        if (output_shape.num_elements() < std::numeric_limits<int32>::max()) {
-          ConcatGPU32<T>(ctx->eigen_gpu_device(), input_tensors_flat,
-                         &output_flat);
-        } else {
-          ConcatGPU64<T>(ctx->eigen_gpu_device(), input_tensors_flat,
-                         &output_flat);
-        }
-      } else {
-        ConcatCPU<T>(ctx->device(), input_tensors_flat, &output_flat);
+        ConcatGPU<T>(ctx, input_tensors_flat, output_tensor, &output_flat);
+        return;
       }
+#endif  // GOOGLE_CUDA
+      ConcatCPU<T>(ctx->device(), input_tensors_flat, &output_flat);
     }
   }
 

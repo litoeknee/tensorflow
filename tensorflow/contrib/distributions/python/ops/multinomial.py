@@ -26,6 +26,21 @@ from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import math_ops
 
 
+_multinomial_prob_note = """
+For each batch of counts `[n_1,...,n_k]`, `P[counts]` is the probability
+that after sampling `n` draws from this Multinomial distribution, the
+number of draws falling in class `j` is `n_j`.  Note that different
+sequences of draws can result in the same counts, thus the probability
+includes a combinatorial coefficient.
+
+Note that input "counts" must be a non-negative tensor with dtype `dtype`
+and whose shape can be broadcast with `self.p` and `self.n`.  For fixed
+leading dimensions, the last dimension represents counts for the
+corresponding Multinomial distribution in `self.p`. `counts` is only legal
+if it sums up to `n` and its components are equal to integer values.
+"""
+
+
 class Multinomial(distribution.Distribution):
   """Multinomial distribution.
 
@@ -105,12 +120,13 @@ class Multinomial(distribution.Distribution):
       logits: Floating point tensor representing the log-odds of a
         positive event with shape broadcastable to `[N1,..., Nm, k], m >= 0`,
         and the same dtype as `n`. Defines this as a batch of `N1 x ... x Nm`
-        different `k` class Multinomial distributions.
+        different `k` class Multinomial distributions. Only one of `logits` or
+        `p` should be passed in.
       p:  Positive floating point tensor with shape broadcastable to
         `[N1,..., Nm, k]` `m >= 0` and same dtype as `n`.  Defines this as
         a batch of `N1 x ... x Nm` different `k` class Multinomial
         distributions. `p`'s components in the last portion of its shape should
-        sum up to 1.
+        sum up to 1. Only one of `logits` or `p` should be passed in.
       validate_args: `Boolean`, default `False`.  Whether to assert valid
         values for parameters `n` and `p`, and `x` in `prob` and `log_prob`.
         If `False`, correct behavior is not guaranteed.
@@ -166,14 +182,16 @@ class Multinomial(distribution.Distribution):
     return self._n
 
   @property
-  def p(self):
-    """Event probabilities."""
-    return self._p
+  def logits(self):
+    """Vector of coordinatewise logits."""
+    return self._logits
 
   @property
-  def logits(self):
-    """Log-odds."""
-    return self._logits
+  def p(self):
+    """Vector of probabilities summing to one.
+
+    Each element is the probability of drawing that coordinate."""
+    return self._p
 
   def _batch_shape(self):
     return array_ops.shape(self._broadcast_shape)
@@ -188,6 +206,7 @@ class Multinomial(distribution.Distribution):
   def _get_event_shape(self):
     return self._mean_val.get_shape().with_rank_at_least(1)[-1:]
 
+  @distribution_util.AppendDocstring(_multinomial_prob_note)
   def _log_prob(self, counts):
     counts = self._assert_valid_sample(counts)
     log_unnormalized_prob = math_ops.reduce_sum(
@@ -196,6 +215,7 @@ class Multinomial(distribution.Distribution):
     log_normalizer = -distribution_util.log_combinations(self.n, counts)
     return log_unnormalized_prob - log_normalizer
 
+  @distribution_util.AppendDocstring(_multinomial_prob_note)
   def _prob(self, counts):
     return math_ops.exp(self._log_prob(counts))
 
@@ -222,20 +242,3 @@ class Multinomial(distribution.Distribution):
         distribution_util.assert_integer_form(
             counts, message="counts have non-integer components.")
     ], counts)
-
-_prob_note = """
-
-    For each batch of counts `[n_1,...,n_k]`, `P[counts]` is the probability
-    that after sampling `n` draws from this Multinomial distribution, the
-    number of draws falling in class `j` is `n_j`.  Note that different
-    sequences of draws can result in the same counts, thus the probability
-    includes a combinatorial coefficient.
-
-    Note that input "counts" must be a non-negative tensor with dtype `dtype`
-    and whose shape can be broadcast with `self.p` and `self.n`.  For fixed
-    leading dimensions, the last dimension represents counts for the
-    corresponding Multinomial distribution in `self.p`. `counts` is only legal
-    if it sums up to `n` and its components are equal to integer values.
-"""
-distribution_util.append_class_fun_doc(Multinomial.log_prob, doc_str=_prob_note)
-distribution_util.append_class_fun_doc(Multinomial.prob, doc_str=_prob_note)

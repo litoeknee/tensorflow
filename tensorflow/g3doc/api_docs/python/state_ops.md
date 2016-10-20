@@ -104,7 +104,7 @@ Creating a variable.
 
 - - -
 
-#### `tf.Variable.__init__(initial_value=None, trainable=True, collections=None, validate_shape=True, caching_device=None, name=None, variable_def=None, dtype=None)` {#Variable.__init__}
+#### `tf.Variable.__init__(initial_value=None, trainable=True, collections=None, validate_shape=True, caching_device=None, name=None, variable_def=None, dtype=None, expected_shape=None)` {#Variable.__init__}
 
 Creates a new variable with value `initial_value`.
 
@@ -147,6 +147,8 @@ variable to its initial value.
 *  <b>`dtype`</b>: If set, initial_value will be converted to the given type.
     If `None`, either the datatype will be kept (if `initial_value` is
     a Tensor), or `convert_to_tensor` will decide.
+*  <b>`expected_shape`</b>: A TensorShape. If set, initial_value is expected
+    to have this shape.
 
 ##### Raises:
 
@@ -1210,6 +1212,17 @@ Returns all variables created with collection=[LOCAL_VARIABLES].
 
 - - -
 
+### `tf.model_variables()` {#model_variables}
+
+Returns all variables in the MODEL_VARIABLES collection.
+
+##### Returns:
+
+  A list of local Variable objects.
+
+
+- - -
+
 ### `tf.moving_average_variables()` {#moving_average_variables}
 
 Returns all variables that maintain their moving averages.
@@ -1345,6 +1358,92 @@ logged by the C++ runtime. This is expected.
 
 
 
+- - -
+
+### `tf.assign(ref, value, validate_shape=None, use_locking=None, name=None)` {#assign}
+
+Update 'ref' by assigning 'value' to it.
+
+This operation outputs "ref" after the assignment is done.
+This makes it easier to chain operations that need to use the reset value.
+
+##### Args:
+
+
+*  <b>`ref`</b>: A mutable `Tensor`.
+    Should be from a `Variable` node. May be uninitialized.
+*  <b>`value`</b>: A `Tensor`. Must have the same type as `ref`.
+    The value to be assigned to the variable.
+*  <b>`validate_shape`</b>: An optional `bool`. Defaults to `True`.
+    If true, the operation will validate that the shape
+    of 'value' matches the shape of the Tensor being assigned to.  If false,
+    'ref' will take on the shape of 'value'.
+*  <b>`use_locking`</b>: An optional `bool`. Defaults to `True`.
+    If True, the assignment will be protected by a lock;
+    otherwise the behavior is undefined, but may exhibit less contention.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  Same as "ref".  Returned as a convenience for operations that want
+  to use the new value after the variable has been reset.
+
+
+- - -
+
+### `tf.assign_add(ref, value, use_locking=None, name=None)` {#assign_add}
+
+Update 'ref' by adding 'value' to it.
+
+This operation outputs "ref" after the update is done.
+This makes it easier to chain operations that need to use the reset value.
+
+##### Args:
+
+
+*  <b>`ref`</b>: A mutable `Tensor`. Must be one of the following types: `float32`, `float64`, `int64`, `int32`, `uint8`, `uint16`, `int16`, `int8`, `complex64`, `complex128`, `qint8`, `quint8`, `qint32`, `half`.
+    Should be from a `Variable` node.
+*  <b>`value`</b>: A `Tensor`. Must have the same type as `ref`.
+    The value to be added to the variable.
+*  <b>`use_locking`</b>: An optional `bool`. Defaults to `False`.
+    If True, the addition will be protected by a lock;
+    otherwise the behavior is undefined, but may exhibit less contention.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  Same as "ref".  Returned as a convenience for operations that want
+  to use the new value after the variable has been updated.
+
+
+- - -
+
+### `tf.assign_sub(ref, value, use_locking=None, name=None)` {#assign_sub}
+
+Update 'ref' by subtracting 'value' from it.
+
+This operation outputs "ref" after the update is done.
+This makes it easier to chain operations that need to use the reset value.
+
+##### Args:
+
+
+*  <b>`ref`</b>: A mutable `Tensor`. Must be one of the following types: `float32`, `float64`, `int64`, `int32`, `uint8`, `uint16`, `int16`, `int8`, `complex64`, `complex128`, `qint8`, `quint8`, `qint32`, `half`.
+    Should be from a `Variable` node.
+*  <b>`value`</b>: A `Tensor`. Must have the same type as `ref`.
+    The value to be subtracted to the variable.
+*  <b>`use_locking`</b>: An optional `bool`. Defaults to `False`.
+    If True, the subtraction will be protected by a lock;
+    otherwise the behavior is undefined, but may exhibit less contention.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  Same as "ref".  Returned as a convenience for operations that want
+  to use the new value after the variable has been updated.
+
+
+
 ## Saving and Restoring Variables
 
 - - -
@@ -1425,7 +1524,7 @@ protocol buffer file in the call to `save()`.
 
 - - -
 
-#### `tf.train.Saver.__init__(var_list=None, reshape=False, sharded=False, max_to_keep=5, keep_checkpoint_every_n_hours=10000.0, name=None, restore_sequentially=False, saver_def=None, builder=None, defer_build=False, allow_empty=False)` {#Saver.__init__}
+#### `tf.train.Saver.__init__(var_list=None, reshape=False, sharded=False, max_to_keep=5, keep_checkpoint_every_n_hours=10000.0, name=None, restore_sequentially=False, saver_def=None, builder=None, defer_build=False, allow_empty=False, write_version=1, pad_step_number=False)` {#Saver.__init__}
 
 Creates a `Saver`.
 
@@ -1493,6 +1592,14 @@ checkpoints per device.
 *  <b>`allow_empty`</b>: If `False` (default) raise an error if there are no
     variables in the graph. Otherwise, construct the saver anyway and make
     it a no-op.
+*  <b>`write_version`</b>: controls what format to use when saving checkpoints.  It
+    also affects certain filepath matching logic.  Defaults to V1
+    currently, and will be switched to the more memory-efficient V2 format
+    in the future.  If set to V2, the Saver is still able to restore from
+    old V1 checkpoints.
+*  <b>`pad_step_number`</b>: if True, pads the global step number in the checkpoint
+    filepaths to some fixed width (8 by default).  This is turned off by
+    default.
 
 ##### Raises:
 
@@ -1571,7 +1678,8 @@ The `save_path` argument is typically a value previously returned from a
 ##### Raises:
 
 
-*  <b>`ValueError`</b>: If the given `save_path` does not point to a file.
+*  <b>`ValueError`</b>: DEPRECATED, do not rely on this Error.  If the given
+    `save_path` does not point to a file.
 
 
 
@@ -1810,9 +1918,9 @@ Similarly, if the regularizer is `None` (the default), the default regularizer
 passed in the variable scope will be used (if that is `None` too,
 then by default no regularization is performed).
 
-If a partitioner is provided, first a sharded `Variable` is created
-via `_get_partitioned_variable`, and the return value is a
-`Tensor` composed of the shards concatenated along the partition axis.
+If a partitioner is provided, a `PartitionedVariable` is returned.
+Accessing this object as a `Tensor` returns the shards concatenated along
+the partition axis.
 
 Some useful partitioners are available.  See, e.g.,
 `variable_axis_size_partitioner` and `min_max_variable_partitioner`.
@@ -1828,9 +1936,9 @@ Some useful partitioners are available.  See, e.g.,
     applying it on a newly created variable will be added to the collection
     GraphKeys.REGULARIZATION_LOSSES and can be used for regularization.
 *  <b>`trainable`</b>: If `True` also add the variable to the graph collection
-    `GraphKeys.TRAINABLE_VARIABLES` (see tf.Variable).
+    `GraphKeys.TRAINABLE_VARIABLES` (see `tf.Variable`).
 *  <b>`collections`</b>: List of graph collections keys to add the Variable to.
-    Defaults to `[GraphKeys.VARIABLES]` (see tf.Variable).
+    Defaults to `[GraphKeys.VARIABLES]` (see `tf.Variable`).
 *  <b>`caching_device`</b>: Optional device string or function describing where the
     Variable should be cached for reading.  Defaults to the Variable's
     device.  If not `None`, caches on another device.  Typical use is to
@@ -1857,7 +1965,8 @@ Some useful partitioners are available.  See, e.g.,
 
 ##### Returns:
 
-  The created or existing variable.
+  The created or existing `Variable` (or `PartitionedVariable`, if a
+  partitioner was used).
 
 ##### Raises:
 
@@ -2145,7 +2254,7 @@ have the following properties:
    that are intended to be locals can be created by specifying
    `tf.Variable(..., trainable=false)`.
 * The function may use variable scopes and other templates internally to
-    create and reuse variables, but it shouldn't use `tf.get_variables` to
+    create and reuse variables, but it shouldn't use `tf.all_variables` to
     capture variables that are defined outside of the scope of the function.
 * Internal scopes and variable names should not depend on any arguments that
     are not supplied to `make_template`. In general you will get a ValueError
@@ -2324,7 +2433,7 @@ tensor shape, the initializer will raise a `ValueError`.
 
 
 *  <b>`ValueError`</b>: Too many elements provided. Needed at most 6, but received 8
-  ```
+```
 
 
 - - -
@@ -2957,6 +3066,26 @@ The `Operation` that produces `values` as an output.
 
 The `Graph` that contains the values, indices, and shape tensors.
 
+
+
+
+### Read-only Lookup Tables
+
+- - -
+
+### `tf.initialize_all_tables(name='init_all_tables')` {#initialize_all_tables}
+
+Returns an Op that initializes all tables of the default graph.
+
+##### Args:
+
+
+*  <b>`name`</b>: Optional name for the initialization op.
+
+##### Returns:
+
+  An Op that initializes all tables.  Note that if there are
+  not tables the returned Op is a NoOp.
 
 
 

@@ -309,6 +309,102 @@ concatenated.
 
 - - -
 
+### `tf.nn.convolution(input, filter, padding, strides=None, dilation_rate=None, name=None)` {#convolution}
+
+Computes sums of N-D convolutions (actually cross-correlation).
+
+This also supports either output striding via the optional `strides` parameter
+or atrous convolution (also known as convolution with holes or dilated
+convolution, based on the French word "trous" meaning holes in English) via
+the optional `dilation_rate` parameter.  Currently, however, output striding
+is not supported for atrous convolutions.
+
+Specifically, given rank (N+2) `input` Tensor of shape
+
+  [num_batches,
+   input_spatial_shape[0],
+   ...,
+   input_spatial_shape[N-1],
+   num_input_channels],
+
+a rank (N+2) `filter` Tensor of shape
+
+  [spatial_filter_shape[0],
+   ...,
+   spatial_filter_shape[N-1],
+   num_input_channels,
+   num_output_channels],
+
+an optional `dilation_rate` tensor of shape [N] (defaulting to [1]*N)
+specifying the filter upsampling/input downsampling rate, and an optional list
+of N `strides` (defaulting [1]*N), this computes for each N-D spatial output
+position (x[0], ..., x[N-1]):
+
+  output[b, x[0], ..., x[N-1], k] =
+
+      sum_{z[0], ..., z[N-1], q}
+
+          filters[z[0], ..., z[N-1], q, k] *
+          padded_input[b,
+                       x[0]*strides[0] + dilation_rate[0]*z[0],
+                       ...,
+                       x[N-1]*strides[N-1] + dilation_rate[N-1]*z[N-1],
+                       q],
+
+where `padded_input` is obtained by zero padding the input using an effective
+spatial filter shape of `(spatial_filter_shape-1) * dilation_rate + 1` and
+output striding `strides` as described in the
+[comment here](https://www.tensorflow.org/api_docs/python/nn.html#convolution).
+
+It is required that 1 <= N <= 3.
+
+##### Args:
+
+
+*  <b>`input`</b>: An N-D `Tensor` of type `T`, of shape
+    `[batch_size] + input_spatial_shape + [in_channels]`.
+*  <b>`filter`</b>: An N-D `Tensor` with the same type as `input` and shape
+    `spatial_filter_shape + [in_channels, out_channels]`.
+*  <b>`padding`</b>: A string, either `"VALID"` or `"SAME"`. The padding algorithm.
+*  <b>`strides`</b>: Optional.  Sequence of N ints >= 1.  Specifies the output stride.
+    Defaults to [1]*N.  If any value of strides is > 1, then all values of
+    dilation_rate must be 1.
+*  <b>`dilation_rate`</b>: Optional.  Sequence of N ints >= 1.  Specifies the filter
+    upsampling/input downsampling rate.  In the literature, the same parameter
+    is sometimes called `input stride` or `dilation`.  The effective filter
+    size used for the convolution will be `spatial_filter_shape +
+    (spatial_filter_shape - 1) * (rate - 1)`, obtained by inserting
+    (dilation_rate[i]-1) zeros between consecutive elements of the original
+    filter in each spatial dimension i.  If any value of dilation_rate is > 1,
+    then all values of strides must be 1.
+*  <b>`name`</b>: Optional name for the returned tensor.
+
+##### Returns:
+
+  A `Tensor` with the same type as `value` of shape
+
+      `[batch_size] + output_spatial_shape + [out_channels]`,
+
+  where `output_spatial_shape` depends on the value of `padding`.
+
+  If padding == "SAME":
+    output_spatial_shape[i] = ceil(input_spatial_shape[i] / strides[i])
+
+  If padding == "VALID":
+    output_spatial_shape[i] =
+      ceil((input_spatial_shape[i] -
+            (spatial_filter_shape[i]-1) * dilation_rate[i])
+           / strides[i]).
+
+##### Raises:
+
+
+*  <b>`ValueError`</b>: If input/output depth does not match `filter` shape, or if
+    padding is other than `"VALID"` or `"SAME"`.
+
+
+- - -
+
 ### `tf.nn.conv2d(input, filter, strides, padding, use_cudnn_on_gpu=None, data_format=None, name=None)` {#conv2d}
 
 Computes a 2-D convolution given 4-D `input` and `filter` tensors.
@@ -497,27 +593,34 @@ to the so-called noble identities in multi-rate signal processing.
 There are many different ways to implement atrous convolution (see the refs
 above). The implementation here reduces
 
+```python
     atrous_conv2d(value, filters, rate, padding=padding)
+```
 
 to the following three operations:
 
+```python
     paddings = ...
     net = space_to_batch(value, paddings, block_size=rate)
     net = conv2d(net, filters, strides=[1, 1, 1, 1], padding="VALID")
     crops = ...
     net = batch_to_space(net, crops, block_size=rate)
+```
 
 Advanced usage. Note the following optimization: A sequence of `atrous_conv2d`
 operations with identical `rate` parameters, 'SAME' `padding`, and filters
 with odd heights/ widths:
 
+```python
     net = atrous_conv2d(net, filters1, rate, padding="SAME")
     net = atrous_conv2d(net, filters2, rate, padding="SAME")
     ...
     net = atrous_conv2d(net, filtersK, rate, padding="SAME")
+```
 
 can be equivalently performed cheaper in terms of computation and memory as:
 
+```python
     pad = ...  # padding so that the input dims are multiples of rate
     net = space_to_batch(net, paddings=pad, block_size=rate)
     net = conv2d(net, filters1, strides=[1, 1, 1, 1], padding="SAME")
@@ -525,6 +628,7 @@ can be equivalently performed cheaper in terms of computation and memory as:
     ...
     net = conv2d(net, filtersK, strides=[1, 1, 1, 1], padding="SAME")
     net = batch_to_space(net, crops=pad, block_size=rate)
+```
 
 because a pair of consecutive `space_to_batch` and `batch_to_space` ops with
 the same `block_size` cancel out when their respective `paddings` and `crops`
@@ -959,8 +1063,7 @@ Then, row_pooling_sequence should satisfy:
 4.  length(row_pooling_sequence) = output_row_length+1
 
 For more details on fractional max pooling, see this paper:
-[Benjamin Graham, Fractional Max-Pooling]
-(http://arxiv.org/abs/1412.6071)
+[Benjamin Graham, Fractional Max-Pooling](http://arxiv.org/abs/1412.6071)
 
 ##### Args:
 
@@ -1011,14 +1114,74 @@ For more details on fractional max pooling, see this paper:
 *  <b>`col_pooling_sequence`</b>: A `Tensor` of type `int64`. column pooling sequence, needed to calculate gradient.
 
 
+- - -
+
+### `tf.nn.pool(input, window_shape, pooling_type, padding, dilation_rate=None, strides=None, name=None)` {#pool}
+
+Performs an N-D pooling operation.
+
+Computes for
+    0 <= b < batch_size,
+    0 <= x[i] < output_spatial_shape[i],
+    0 <= c < num_channels:
+
+  output[b, x[0], ..., x[N-1], c] =
+    REDUCE_{z[0], ..., z[N-1]}
+      input[b,
+            x[0] * strides[0] - pad_before[0] + dilation_rate[0]*z[0],
+            ...
+            x[N-1]*strides[N-1] - pad_before[N-1] + dilation_rate[N-1]*z[N-1],
+            c],
+
+where the reduction function REDUCE depends on the value of `pooling_type`,
+and pad_before is defined based on the value of `padding` as described in the
+[comment here](https://www.tensorflow.org/api_docs/python/nn.html#convolution).
+The reduction never includes out-of-bounds positions.
+
+##### Args:
+
+
+*  <b>`input`</b>: Tensor of rank N+2, of shape
+    [batch_size] + input_spatial_shape + [num_channels].
+    Pooling happens over the spatial dimensions only.
+*  <b>`window_shape`</b>: Sequence of N ints >= 1.
+*  <b>`pooling_type`</b>: Specifies pooling operation, must be "AVG" or "MAX".
+*  <b>`padding`</b>: The padding algorithm, must be "SAME" or "VALID".
+    See the [comment here](https://www.tensorflow.org/api_docs/python/nn.html#convolution)
+*  <b>`dilation_rate`</b>: Optional.  Dilation rate.  List of N ints >= 1.
+    Defaults to [1]*N.  If any value of dilation_rate is > 1, then all values
+    of strides must be 1.
+*  <b>`strides`</b>: Optional.  Sequence of N ints >= 1.  Defaults to [1]*N.
+    If any value of strides is > 1, then all values of dilation_rate must be
+    1.
+*  <b>`name`</b>: Optional. Name of the op.
+
+##### Returns:
+
+  Tensor of rank N+2, of shape
+    [batch_size] + output_spatial_shape + [num_channels],
+  where `output_spatial_shape` depends on the value of padding:
+
+  If padding = "SAME":
+    output_spatial_shape[i] = ceil(input_spatial_shape[i] / strides[i])
+  If padding = "VALID":
+    output_spatial_shape[i] =
+      ceil((input_spatial_shape[i] - (window_shape[i] - 1) * dilation_rate[i])
+           / strides[i]).
+
+##### Raises:
+
+
+*  <b>`ValueError`</b>: if arguments are invalid.
+
+
 
 ## Morphological filtering
 
 Morphological operators are non-linear filters used in image processing.
 
-[Greyscale morphological dilation]
-(https://en.wikipedia.org/wiki/Dilation_(morphology)) is the max-sum counterpart
-of standard sum-product convolution:
+[Greyscale morphological dilation](https://en.wikipedia.org/wiki/Dilation_(morphology))
+is the max-sum counterpart of standard sum-product convolution:
 
     output[b, y, x, c] =
         max_{dy, dx} input[b,
@@ -1031,9 +1194,8 @@ The `filter` is usually called structuring function. Max-pooling is a special
 case of greyscale morphological dilation when the filter assumes all-zero
 values (a.k.a. flat structuring function).
 
-[Greyscale morphological erosion]
-(https://en.wikipedia.org/wiki/Erosion_(morphology)) is the min-sum counterpart
-of standard sum-product convolution:
+[Greyscale morphological erosion](https://en.wikipedia.org/wiki/Erosion_(morphology))
+is the min-sum counterpart of standard sum-product convolution:
 
     output[b, y, x, c] =
         min_{dy, dx} input[b,
@@ -1207,8 +1369,7 @@ each component is divided by the weighted, squared sum of inputs within
     output = input / (bias + alpha * sqr_sum) ** beta
 
 For details, see [Krizhevsky et al., ImageNet classification with deep
-convolutional neural networks (NIPS 2012)]
-(http://papers.nips.cc/paper/4824-imagenet-classification-with-deep-convolutional-neural-networks).
+convolutional neural networks (NIPS 2012)](http://papers.nips.cc/paper/4824-imagenet-classification-with-deep-convolutional-neural-networks).
 
 ##### Args:
 
@@ -1253,6 +1414,7 @@ https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Computing_shif
 ##### Returns:
 
   Four `Tensor` objects of the same type as `x`:
+
   * the count (number of elements to average over).
   * the (possibly shifted) sum of the elements in the array.
   * the (possibly shifted) sum of squares of the elements in the array.
@@ -1294,15 +1456,16 @@ and variance of a vector.
 
 When using these moments for batch normalization (see
 `tf.nn.batch_normalization`):
-  * for so-called "global normalization", used with convolutional filters with
-    shape `[batch, height, width, depth]`, pass `axes=[0, 1, 2]`.
-  * for simple batch normalization pass `axes=[0]` (batch only).
+
+ * for so-called "global normalization", used with convolutional filters with
+   shape `[batch, height, width, depth]`, pass `axes=[0, 1, 2]`.
+ * for simple batch normalization pass `axes=[0]` (batch only).
 
 ##### Args:
 
 
 *  <b>`x`</b>: A `Tensor`.
-*  <b>`axes`</b>: array of ints.  Axes along which to compute mean and
+*  <b>`axes`</b>: Array of ints.  Axes along which to compute mean and
     variance.
 *  <b>`shift`</b>: A `Tensor` containing the value by which to shift the data for
     numerical stability, or `None` if no shift is to be performed. A shift
@@ -1313,6 +1476,28 @@ When using these moments for batch normalization (see
 ##### Returns:
 
   Two `Tensor` objects: `mean` and `variance`.
+
+
+- - -
+
+### `tf.nn.weighted_moments(x, axes, frequency_weights, name=None, keep_dims=False)` {#weighted_moments}
+
+Returns the frequency-weighted mean and variance of `x`.
+
+##### Args:
+
+
+*  <b>`x`</b>: A tensor.
+*  <b>`axes`</b>: 1-d tensor of int32 values; these are the axes along which
+    to compute mean and variance.
+*  <b>`frequency_weights`</b>: A tensor of positive weights which can be
+    broadcast with x.
+*  <b>`name`</b>: Name used to scope the operation.
+*  <b>`keep_dims`</b>: Produce moments with the same dimensionality as the input.
+
+##### Returns:
+
+  Two tensors: `weighted_mean` and `weighted_variance`.
 
 
 
@@ -1348,17 +1533,17 @@ Computes half the L2 norm of a tensor without the `sqrt`:
 
 ### `tf.nn.log_poisson_loss(log_input, targets, compute_full_loss=False, name=None)` {#log_poisson_loss}
 
-Computes log poisson loss given `log_input`.
+Computes log Poisson loss given `log_input`.
 
 Gives the log-likelihood loss between the prediction and the target under the
-assumption that the target has a poisson distribution.
+assumption that the target has a Poisson distribution.
 Caveat: By default, this is not the exact loss, but the loss minus a
   constant term [log(z!)]. That has no effect for optimization, but
   does not play well with relative loss comparisons. To compute an
   approximation of the log factorial term, specify
   compute_full_loss=True to enable Stirling's Approximation.
 
-For brevity, let `c = log(x) = log_input`, `z = targets`.  The log poisson
+For brevity, let `c = log(x) = log_input`, `z = targets`.  The log Poisson
 loss is
 
       -log(exp(-x) * (x^z) / z!)
@@ -1451,7 +1636,7 @@ equivalent formulation
 
 ### `tf.nn.softmax(logits, dim=-1, name=None)` {#softmax}
 
-Computes softmax activations.
+Computes log softmax activations.
 
 For each batch `i` and class `j` we have
 
@@ -1485,7 +1670,7 @@ Computes log softmax activations.
 
 For each batch `i` and class `j` we have
 
-    logsoftmax = logits - log(reduce_sum(exp(logits), dim))
+    logsoftmax = logits - reduce_sum(exp(logits), dim)
 
 ##### Args:
 
@@ -1572,16 +1757,16 @@ output of `softmax`, as it will produce incorrect results.
 A common use case is to have logits of shape `[batch_size, num_classes]` and
 labels of shape `[batch_size]`. But higher dimensions are supported.
 
-##### Args:
+Args:
 
-
-*  <b>`logits`</b>: Unscaled log probabilities of rank `r` and shape
+  logits: Unscaled log probabilities of rank `r` and shape
     `[d_0, d_1, ..., d_{r-2}, num_classes]` and dtype `float32` or `float64`.
-*  <b>`labels`</b>: `Tensor` of shape `[d_0, d_1, ..., d_{r-2}]` and dtype `int32` or
+  labels: `Tensor` of shape `[d_0, d_1, ..., d_{r-2}]` and dtype `int32` or
     `int64`. Each entry in `labels` must be an index in `[0, num_classes)`.
-    Other values will result in a loss of 0, but incorrect gradient
-    computations.
-*  <b>`name`</b>: A name for the operation (optional).
+    Other values will raise an exception when this op is run on CPU, and
+    return `NaN` for corresponding corresponding loss and gradient rows
+    on GPU.
+  name: A name for the operation (optional).
 
 ##### Returns:
 
@@ -1642,7 +1827,7 @@ the implementation uses
 ##### Returns:
 
   A `Tensor` of the same shape as `logits` with the componentwise
-  weightedlogistic losses.
+  weighted logistic losses.
 
 ##### Raises:
 
@@ -1665,7 +1850,9 @@ Looks up `ids` in a list of embedding tensors.
 This function is used to perform parallel lookups on the list of
 tensors in `params`.  It is a generalization of
 [`tf.gather()`](../../api_docs/python/array_ops.md#gather), where `params` is
-interpreted as a partition of a larger embedding tensor.
+interpreted as a partitioning of a large embedding tensor.  `params` may be
+a `PartitionedVariable` as returned by using `tf.get_variable()` with a
+partitioner.
 
 If `len(params) > 1`, each element `id` of `ids` is partitioned between
 the elements of `params` according to the `partition_strategy`.
@@ -1689,8 +1876,9 @@ tensor. The returned tensor has shape `shape(ids) + shape(params)[1:]`.
 
 
 *  <b>`params`</b>: A list of tensors with the same type and which can be concatenated
-    along dimension 0. Each `Tensor` must be appropriately sized for the given
-    `partition_strategy`.
+    along dimension 0. Alternatively, a `PartitionedVariable`, created by
+    partitioning along dimension 0.  Each element must be appropriately sized
+    for the given `partition_strategy`.
 *  <b>`ids`</b>: A `Tensor` with type `int32` or `int64` containing the ids to be looked
     up in `params`.
 *  <b>`partition_strategy`</b>: A string specifying the partitioning strategy, relevant
@@ -1727,7 +1915,8 @@ is the sum of the size of params along dimension 0.
 
 *  <b>`params`</b>: A single tensor representing the complete embedding tensor,
     or a list of P tensors all of same shape except for the first dimension,
-    representing sharded embedding tensors.
+    representing sharded embedding tensors.  Alternatively, a
+    `PartitionedVariable`, created by partitioning along dimension 0.
 *  <b>`sp_ids`</b>: N x M SparseTensor of int64 ids (typically from FeatureValueToId),
     where N is typically batch size and M is arbitrary.
 *  <b>`sp_weights`</b>: either a SparseTensor of float / double weights, or None to
@@ -1752,10 +1941,15 @@ is the sum of the size of params along dimension 0.
   corresponding weight, and combines these embeddings as specified.
 
   In other words, if
+
     shape(combined params) = [p0, p1, ..., pm]
+
   and
+
     shape(sp_ids) = shape(sp_weights) = [d0, d1, ..., dn]
+
   then
+
     shape(output) = [d0, d1, ..., dn-1, p1, ..., pm].
 
   For instance, if params is a 10x20 matrix, and sp_ids / sp_weights are
@@ -1765,7 +1959,8 @@ is the sum of the size of params along dimension 0.
     [1, 0]: id 0, weight 1.0
     [2, 3]: id 1, weight 3.0
 
-  with combiner="mean", then the output will be a 3x20 matrix where
+  with `combiner`="mean", then the output will be a 3x20 matrix where
+
     output[0, :] = (params[1, :] * 2.0 + params[3, :] * 0.5) / (2.0 + 0.5)
     output[1, :] = params[0, :] * 1.0
     output[2, :] = params[1, :] * 3.0
@@ -1897,7 +2092,8 @@ for correctness than performance, unlike in rnn().
 Creates a recurrent neural network specified by RNNCell `cell`.
 
 The simplest form of RNN network generated is:
-```py
+
+```python
   state = cell.zero_state(...)
   outputs = []
   for input_ in inputs:
@@ -1914,11 +2110,14 @@ sequence length of the minibatch (thus saving computational time),
 and properly propagates the state at an example's sequence length
 to the final state output.
 
-The dynamic calculation performed is, at time t for batch row b,
+The dynamic calculation performed is, at time `t` for batch row `b`,
+
+```python
   (output, state)(b, t) =
     (t >= sequence_length(b))
       ? (zeros(cell.output_size), states(b, sequence_length(b) - 1))
       : cell(input(b, t), state(b, t - 1))
+```
 
 ##### Args:
 
@@ -1941,9 +2140,10 @@ The dynamic calculation performed is, at time t for batch row b,
 ##### Returns:
 
   A pair (outputs, state) where:
-    - outputs is a length T list of outputs (one for each input), or a nested
-      tuple of such elements.
-    - state is the final state
+
+  - outputs is a length T list of outputs (one for each input), or a nested
+    tuple of such elements.
+  - state is the final state
 
 ##### Raises:
 
@@ -2149,7 +2349,7 @@ Instead of working with `Tensor` objects, most operations work with
 
 The operation of `raw_rnn`, in pseudo-code, is basically the following:
 
-```
+```python
 time = tf.constant(0, dtype=tf.int32)
 (finished, next_input, initial_state, _, loop_state) = loop_fn(
     time=time, cell_output=None, cell_state=None, loop_state=None)
@@ -2164,7 +2364,7 @@ while not all(finished):
   state = tf.select(finished, state, next_state)
   emit = tf.select(finished, tf.zeros_like(emit), emit)
   emit_ta = emit_ta.write(time, emit)
-  # If any new minibatch entries are marked as finished, mark these
+  # If any new minibatch entries are marked as finished, mark these.
   finished = tf.logical_or(finished, next_finished)
   time += 1
 return (emit_ta, state, loop_state)
@@ -2302,7 +2502,7 @@ outputs = outputs_ta.pack()
 
 
 
-## Conectionist Temporal Classification (CTC)
+## Connectionist Temporal Classification (CTC)
 
 - - -
 
@@ -2502,7 +2702,7 @@ is `A B B B B`, the return value is:
 ## Evaluation
 
 The evaluation ops are useful for measuring the performance of a network.
-Since they are nondifferentiable, they are typically used at evaluation time.
+Since they are non-differentiable, they are typically used at evaluation time.
 
 - - -
 
@@ -2585,8 +2785,8 @@ Candidate Sampling training algorithms can speed up your step times by
 only considering a small randomly-chosen subset of contrastive classes
 (called candidates) for each batch of training examples.
 
-See our [Candidate Sampling Algorithms Reference]
-(../../extras/candidate_sampling.pdf)
+See our
+[Candidate Sampling Algorithms Reference](../../extras/candidate_sampling.pdf)
 
 ### Sampled Loss Functions
 
@@ -3008,6 +3208,104 @@ target classes as noise classes for the same example.
 
 
 
+### Quantization ops
+
+- - -
+
+### `tf.nn.quantized_relu_x(features, max_value, min_features, max_features, out_type=None, name=None)` {#quantized_relu_x}
+
+Computes Quantized Rectified Linear X: `min(max(features, 0), max_value)`
+
+##### Args:
+
+
+*  <b>`features`</b>: A `Tensor`. Must be one of the following types: `qint8`, `quint8`, `qint16`, `quint16`, `qint32`.
+*  <b>`max_value`</b>: A `Tensor` of type `float32`.
+*  <b>`min_features`</b>: A `Tensor` of type `float32`.
+    The float value that the lowest quantized value represents.
+*  <b>`max_features`</b>: A `Tensor` of type `float32`.
+    The float value that the highest quantized value represents.
+*  <b>`out_type`</b>: An optional `tf.DType` from: `tf.qint8, tf.quint8, tf.qint16, tf.quint16, tf.qint32`. Defaults to `tf.quint8`.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  A tuple of `Tensor` objects (activations, min_activations, max_activations).
+
+*  <b>`activations`</b>: A `Tensor` of type `out_type`. Has the same output shape as "features".
+*  <b>`min_activations`</b>: A `Tensor` of type `float32`. The float value that the lowest quantized value represents.
+*  <b>`max_activations`</b>: A `Tensor` of type `float32`. The float value that the highest quantized value represents.
+
+
+- - -
+
+### `tf.nn.quantized_max_pool(input, min_input, max_input, ksize, strides, padding, name=None)` {#quantized_max_pool}
+
+Produces the max pool of the input tensor for quantized types.
+
+##### Args:
+
+
+*  <b>`input`</b>: A `Tensor`. Must be one of the following types: `qint8`, `quint8`, `qint16`, `quint16`, `qint32`.
+    The 4D (batch x rows x cols x depth) Tensor to MaxReduce over.
+*  <b>`min_input`</b>: A `Tensor` of type `float32`.
+    The float value that the lowest quantized input value represents.
+*  <b>`max_input`</b>: A `Tensor` of type `float32`.
+    The float value that the highest quantized input value represents.
+*  <b>`ksize`</b>: A list of `ints`.
+    The size of the window for each dimension of the input tensor.
+    The length must be 4 to match the number of dimensions of the input.
+*  <b>`strides`</b>: A list of `ints`.
+    The stride of the sliding window for each dimension of the input
+    tensor. The length must be 4 to match the number of dimensions of the input.
+*  <b>`padding`</b>: A `string` from: `"SAME", "VALID"`.
+    The type of padding algorithm to use.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  A tuple of `Tensor` objects (output, min_output, max_output).
+
+*  <b>`output`</b>: A `Tensor`. Has the same type as `input`.
+*  <b>`min_output`</b>: A `Tensor` of type `float32`. The float value that the lowest quantized output value represents.
+*  <b>`max_output`</b>: A `Tensor` of type `float32`. The float value that the highest quantized output value represents.
+
+
+- - -
+
+### `tf.nn.quantized_avg_pool(input, min_input, max_input, ksize, strides, padding, name=None)` {#quantized_avg_pool}
+
+Produces the average pool of the input tensor for quantized types.
+
+##### Args:
+
+
+*  <b>`input`</b>: A `Tensor`. Must be one of the following types: `qint8`, `quint8`, `qint16`, `quint16`, `qint32`.
+    4-D with shape `[batch, height, width, channels]`.
+*  <b>`min_input`</b>: A `Tensor` of type `float32`.
+    The float value that the lowest quantized input value represents.
+*  <b>`max_input`</b>: A `Tensor` of type `float32`.
+    The float value that the highest quantized input value represents.
+*  <b>`ksize`</b>: A list of `ints`.
+    The size of the window for each dimension of the input tensor.
+    The length must be 4 to match the number of dimensions of the input.
+*  <b>`strides`</b>: A list of `ints`.
+    The stride of the sliding window for each dimension of the input
+    tensor.  The length must be 4 to match the number of dimensions of the input.
+*  <b>`padding`</b>: A `string` from: `"SAME", "VALID"`.
+    The type of padding algorithm to use.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  A tuple of `Tensor` objects (output, min_output, max_output).
+
+*  <b>`output`</b>: A `Tensor`. Has the same type as `input`.
+*  <b>`min_output`</b>: A `Tensor` of type `float32`. The float value that the lowest quantized output value represents.
+*  <b>`max_output`</b>: A `Tensor` of type `float32`. The float value that the highest quantized output value represents.
+
+
+
 ## Other Functions and Classes
 - - -
 
@@ -3017,12 +3315,13 @@ Batch normalization.
 
 As described in http://arxiv.org/abs/1502.03167.
 Normalizes a tensor by `mean` and `variance`, and applies (optionally) a
-`scale` \\\\(\gamma\\\\) to it, as well as an `offset` \\\\(\\beta\\\\):
+`scale` \\(\gamma\\) to it, as well as an `offset` \\(\beta\\):
 
-\\\\(\\frac{\gamma(x-\mu)}{\sigma}+\\beta\\\\)
+\\(\frac{\gamma(x-\mu)}{\sigma}+\beta\\)
 
 `mean`, `variance`, `offset` and `scale` are all expected to be of one of two
 shapes:
+
   * In all generality, they can have the same number of dimensions as the
     input `x`, with identical sizes as `x` for the dimensions that are not
     normalized over (the 'depth' dimension(s)), and dimension 1 for the
@@ -3046,9 +3345,9 @@ shapes:
 *  <b>`x`</b>: Input `Tensor` of arbitrary dimensionality.
 *  <b>`mean`</b>: A mean `Tensor`.
 *  <b>`variance`</b>: A variance `Tensor`.
-*  <b>`offset`</b>: An offset `Tensor`, often denoted \\\\(\\beta\\\\) in equations, or
+*  <b>`offset`</b>: An offset `Tensor`, often denoted \\(\beta\\) in equations, or
     None. If present, will be added to the normalized tensor.
-*  <b>`scale`</b>: A scale `Tensor`, often denoted \\\\(\gamma\\\\) in equations, or
+*  <b>`scale`</b>: A scale `Tensor`, often denoted \\(\gamma\\) in equations, or
     `None`. If present, the scale is applied to the normalized tensor.
 *  <b>`variance_epsilon`</b>: A small float number to avoid dividing by 0.
 *  <b>`name`</b>: A name for this operation (optional).
