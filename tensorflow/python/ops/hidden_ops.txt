@@ -3,6 +3,7 @@ BatchToSpace
 BroadcastGradientArgs
 ConcatOffset
 Concat
+ConcatV2
 Const
 EditDistance
 MirrorPad
@@ -227,6 +228,11 @@ TruncatedNormal
 # script_ops
 PyFunc
 PyFuncStateless
+
+# sdca_ops
+SdcaFprint
+SdcaOptimizer
+SdcaShrinkL1
 
 # state_ops
 Variable

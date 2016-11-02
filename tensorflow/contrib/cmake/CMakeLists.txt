@@ -56,6 +56,7 @@ if(WIN32)
   add_definitions(/wd4267 /wd4244 /wd4800 /wd4503 /wd4554 /wd4996 /wd4348 /wd4018)
   add_definitions(/wd4099 /wd4146 /wd4267 /wd4305 /wd4307)
   add_definitions(/wd4715 /wd4722 /wd4723 /wd4838 /wd4309 /wd4334)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
 endif()
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
@@ -73,8 +74,6 @@ include(jsoncpp)
 include(farmhash)
 include(highwayhash)
 include(protobuf)
-
-find_package(ZLIB REQUIRED)
 
 set(tensorflow_EXTERNAL_LIBRARIES
     ${zlib_STATIC_LIBRARIES}
@@ -96,6 +95,7 @@ set(tensorflow_EXTERNAL_DEPENDENCIES
     highwayhash_copy_headers_to_destination
     protobuf
     eigen
+    gemmlowp
 )
 
 include_directories(
@@ -140,7 +140,8 @@ if (tensorflow_ENABLE_GPU)
 
     # by default we assume compute cabability 3.5 and 5.2. If you change this change it in
     # CUDA_NVCC_FLAGS and cuda_config.h below
-    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-gencode arch=compute_35,code=sm_35;-gencode arch=compute_52,code=sm_52;--include-path ${PROJECT_BINARY_DIR}/$\{build_configuration\};--expt-relaxed-constexpr)
+    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-gencode arch=compute_35,code=\"sm_35,compute_35\";-gencode arch=compute_52,code=\"sm_52,compute_52\")
+    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};--include-path ${PROJECT_BINARY_DIR}/$\{build_configuration\};--expt-relaxed-constexpr)
     set(CUDA_INCLUDE ${CUDA_TOOLKIT_TARGET_DIR} ${CUDA_TOOLKIT_TARGET_DIR}/extras/CUPTI/include)
     include_directories(${CUDA_INCLUDE})
     add_definitions(-DGOOGLE_CUDA=1 -DTF_EXTRA_CUDA_CAPABILITIES=3.5,5.2)
@@ -197,6 +198,7 @@ endif()
 include(tf_cc_ops.cmake)
 if(tensorflow_BUILD_CC_EXAMPLE)
   include(tf_tutorials.cmake)
+  include(tf_label_image_example.cmake)
 endif()
 if(tensorflow_BUILD_PYTHON_BINDINGS)
   include(tf_python.cmake)

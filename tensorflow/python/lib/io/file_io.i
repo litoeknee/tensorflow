@@ -66,6 +66,16 @@ void WriteStringToFile(const string& filename, const string& file_content,
   }
 }
 
+std::vector<string> GetChildren(const string& dir, TF_Status* out_status) {
+  std::vector<string> results;
+  tensorflow::Status status = tensorflow::Env::Default()->GetChildren(
+      dir, &results);
+  if (!status.ok()) {
+    Set_TF_Status_from_Status(out_status, status);
+  }
+  return results;
+}
+
 std::vector<string> GetMatchingFiles(const string& filename,
                                      TF_Status* out_status) {
   std::vector<string> results;
@@ -233,6 +243,7 @@ inline void DeleteFile(const string& filename, TF_Status* out_status);
 string ReadFileToString(const string& filename, TF_Status* out_status);
 void WriteStringToFile(const string& filename, const string& file_content,
                        TF_Status* out_status);
+std::vector<string> GetChildren(const string& dir, TF_Status* out_status);
 std::vector<string> GetMatchingFiles(const string& filename,
                                      TF_Status* out_status);
 void CreateDir(const string& dirname, TF_Status* out_status);
@@ -275,5 +286,8 @@ string ReadFromStream(tensorflow::io::BufferedInputStream* stream,
 %unignoreall
 
 %include "tensorflow/c/tf_status_helper.h"
+
+%ignore tensorflow::io::internal::JoinPathImpl;
 %include "tensorflow/core/lib/io/path.h"
+
 %include "tensorflow/core/platform/file_statistics.h"

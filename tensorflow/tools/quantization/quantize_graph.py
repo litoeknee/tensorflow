@@ -28,11 +28,13 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import collections
 import re
 import numpy as np
 import tensorflow as tf
 
 from tensorflow.python.framework import graph_util
+from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import tensor_util
 
 
@@ -54,6 +56,16 @@ flags.DEFINE_string("test_input_dims", "1,224,224,3",
                     """ graph loaded from a file.""")
 flags.DEFINE_boolean("strip_redundant_quantization", True,
                      """Removes redundant dequantize/quantize pairs.""")
+flags.DEFINE_boolean("quantized_input", False,
+                     "If true, assume Placeholders are quantized with values "
+                     "covering [--quantized_input_min,--quantized_input_max]. "
+                     "Only supported when --mode=eightbit")
+flags.DEFINE_float("quantized_input_min", 0,
+                   "The minimum of the actual input range when "
+                   "--quantized_input")
+flags.DEFINE_float("quantized_input_max", 1,
+                   "The maximum of the actual input range when "
+                   "--quantized_input")
 
 
 def print_input_nodes(current_node, nodes_map, indent, already_visited):
@@ -92,6 +104,14 @@ def copy_attr(node, key, attr_value):
 def set_attr_dtype(node, key, value):
   try:
     node.attr[key].CopyFrom(tf.AttrValue(type=value.as_datatype_enum))
+  except KeyError:
+    pass
+
+
+def set_attr_shape(node, key, value):
+  try:
+    node.attr[key].CopyFrom(
+        tf.AttrValue(shape=tensor_shape.as_shape(value).as_proto()))
   except KeyError:
     pass
 
@@ -201,7 +221,7 @@ def quantize_weight_rounded(input_node):
   """Returns a replacement node for input_node containing bucketed floats."""
   input_tensor = input_node.attr["value"].tensor
   tensor_value = tensor_util.MakeNdarray(input_tensor)
-  tensor_shape = input_tensor.tensor_shape
+  shape = input_tensor.tensor_shape
   # Currently, the parameter FLAGS.bitdepth is used to compute the
   # number of buckets as 1 << FLAGS.bitdepth, meaning the number of
   # buckets can only be a power of 2.
@@ -211,7 +231,7 @@ def quantize_weight_rounded(input_node):
   # to this script than absolutely necessary.
   num_buckets = 1 << FLAGS.bitdepth
   tensor_value_rounded = quantize_array(tensor_value, num_buckets)
-  tensor_shape_list = tensor_util.TensorShapeProtoToList(tensor_shape)
+  tensor_shape_list = tensor_util.TensorShapeProtoToList(shape)
   return [create_constant_node(input_node.name, tensor_value_rounded,
                                tf.float32, shape=tensor_shape_list)]
 
@@ -264,16 +284,24 @@ def quantize_weight_eightbit(input_node, quantization_mode):
   return [quint8_const_node, min_node, max_node, dequantize_node]
 
 
+EightbitizeRecursionState = collections.namedtuple(
+    "EightbitizeRecursionState", ["already_visited", "output_node_stack",
+                                  "merged_with_fake_quant"])
+
+
 class GraphRewriter(object):
   """Takes a float graph, and rewrites it in quantized form."""
 
-  def __init__(self, input_graph, mode):
+  def __init__(self, input_graph, mode, quantized_input_range):
     """Sets up the class to rewrite a float graph.
 
     Args:
       input_graph: A float graph to transform.
       mode: A string controlling how quantization is performed -
         round, quantize, eightbit, or weights.
+      quantized_input_range: if set, assume the input is
+        quantized and represents the range
+        [quantized_input_range[0], quantized_input_range[1]]
 
     Raises:
       ValueError: Two nodes with the same name were found in the graph.
@@ -282,6 +310,20 @@ class GraphRewriter(object):
     self.nodes_map = self.create_nodes_map(input_graph)
     self.output_graph = None
     self.mode = mode
+    self.final_node_renames = {}
+    if quantized_input_range:
+      self.input_range = (quantized_input_range[0], quantized_input_range[1])
+      if self.input_range[0] >= self.input_range[1]:
+        raise ValueError("Invalid quantized_input_range: [%s,%s]" %
+                         self.input_range)
+      if self.mode != "eightbit":
+        raise ValueError(
+            "quantized_input_range can only be specified in eightbit mode")
+    else:
+      self.input_range = None
+
+    # Data that is valid only during the recursive call to rewrite the graph.
+    self.state = None
 
   def create_nodes_map(self, graph):
     """Builds a mapping of node names to their defs from the graph."""
@@ -319,15 +361,23 @@ class GraphRewriter(object):
       self.set_input_graph(graph_util.remove_training_nodes(self.input_graph))
       output_nodes = [self.nodes_map[output_node_name]
                       for output_node_name in output_node_names]
-      self.already_visited = {}
-      self.layers_eightbitized = []
+
+      self.state = EightbitizeRecursionState(already_visited={},
+                                             output_node_stack=[],
+                                             merged_with_fake_quant={})
       for output_node in output_nodes:
         self.eightbitize_nodes_recursively(output_node)
-      self.output_graph = self.quantize_weights(self.output_graph, b"MIN_FIRST")
+      self.state = None
+      if self.input_range:
+        self.add_output_graph_node(create_constant_node(
+            "quantized_input_min_value", self.input_range[0], tf.float32, []))
+        self.add_output_graph_node(create_constant_node(
+            "quantized_input_max_value", self.input_range[1], tf.float32, []))
       if FLAGS.strip_redundant_quantization:
         self.output_graph = self.remove_redundant_quantization(
             self.output_graph)
         self.remove_dead_nodes(output_node_names)
+      self.apply_final_node_renames()
     elif self.mode == "weights":
       self.output_graph = self.quantize_weights(self.input_graph,
                                                 b"MIN_COMBINED")
@@ -437,20 +487,54 @@ class GraphRewriter(object):
     set_attr_string(dequantize_node, "mode", b"MIN_FIRST")
     self.add_output_graph_node(dequantize_node)
 
+  def should_merge_with_fake_quant_node(self):
+    """Should the current node merge with self.state.output_node_stack[-1]?"""
+    if not self.state.output_node_stack: return False
+    top = self.state.output_node_stack[-1]
+    return top[1] == 0 and top[0].op in ["FakeQuantWithMinMaxVars"]
+
+  def should_quantize_const(self, node):
+    if not self.state.output_node_stack: return False
+    top = self.state.output_node_stack[-1]
+    if not top[2]: return False
+    assert tf.as_dtype(node.attr["dtype"].type) == tf.float32, (
+        "Quantizing constant %s" % node.name)
+    return True
+
   def eightbitize_nodes_recursively(self, current_node):
     """The entry point for transforming a graph into full eight bit."""
-    self.already_visited[current_node.name] = True
-    for input_node_name in current_node.input:
+    if current_node.name in self.state.already_visited:
+      if (self.should_merge_with_fake_quant_node() or
+          current_node.name in self.state.merged_with_fake_quant):
+        raise ValueError("Unsupported graph structure: output of node %s "
+                         "is processed by a FakeQuant* node and should have "
+                         "no other outputs.", current_node.name)
+      return
+    self.state.already_visited[current_node.name] = True
+
+    for i, input_node_name in enumerate(current_node.input):
+      quantize_input = False
+      if current_node.op in ("MatMul", "Conv2D", "BiasAdd", "MaxPool",
+                             "AvgPool", "Relu", "Relu6",
+                             "BatchNormWithGlobalNormalization"):
+        quantize_input = True
+      elif current_node.op == "Concat" and i > 0:
+        quantize_input = True
+      elif current_node.op == "Reshape" and i == 0:
+        quantize_input = True
+
+      self.state.output_node_stack.append((current_node, i, quantize_input))
+
       input_node_name = node_name_from_input(input_node_name)
-      if input_node_name in self.already_visited:
-        continue
       input_node = self.nodes_map[input_node_name]
       self.eightbitize_nodes_recursively(input_node)
+
+      self.state.output_node_stack.pop()
+
     if current_node.op == "MatMul":
       self.eightbitize_mat_mul_node(current_node)
     elif current_node.op == "Conv2D":
       self.eightbitize_conv_node(current_node)
-      self.layers_eightbitized.append(current_node.name)
     elif current_node.op == "BiasAdd":
       self.eightbitize_bias_add_node(current_node)
     elif current_node.op == "MaxPool" or current_node.op == "AvgPool":
@@ -463,10 +547,33 @@ class GraphRewriter(object):
       self.eightbitize_concat_node(current_node)
     elif current_node.op == "BatchNormWithGlobalNormalization":
       self.eightbitize_batch_norm_node(current_node)
+    elif current_node.op == "Reshape":
+      self.eightbitize_reshape_node(current_node)
+    elif (self.input_range and
+          current_node.op in ("Placeholder", "PlaceholderV2")):
+      self.eightbitize_placeholder_node(current_node)
+    elif current_node.op == "FakeQuantWithMinMaxVars":
+      # It will have been merged into the underlying node.
+      pass
+    elif current_node.op == "Const":
+      if self.should_quantize_const(current_node):
+        for n in quantize_weight_eightbit(current_node, b"MIN_FIRST"):
+          self.add_output_graph_node(n)
+      else:
+        new_node = tf.NodeDef()
+        new_node.CopyFrom(current_node)
+        self.add_output_graph_node(new_node)
     else:
       new_node = tf.NodeDef()
       new_node.CopyFrom(current_node)
       self.add_output_graph_node(new_node)
+
+    if (self.should_merge_with_fake_quant_node() and
+        current_node.name not in self.state.merged_with_fake_quant):
+      raise ValueError(
+          "FakeQuant* node %s failed to merge with node %s of type %s" % (
+              self.state.output_node_stack[-1][0], current_node.name,
+              current_node.op))
 
   def add_eightbit_prologue_nodes(self, original_node):
     """Adds input conversion nodes to handle quantizing the underlying node."""
@@ -533,31 +640,59 @@ class GraphRewriter(object):
     max_output_name = quantize_input_name + ":2"
     return quantize_input_name, min_output_name, max_output_name
 
-  def add_quantize_down_node(self, original_node, quantized_output_name):
-    quantize_down_name = original_node.name + "_eightbit_quantize_down"
-    quantize_down_node = create_node(
-        "QuantizeDownAndShrinkRange", quantize_down_name,
-        [quantized_output_name, quantized_output_name + ":1",
-         quantized_output_name + ":2"])
-    set_attr_dtype(quantize_down_node, "Tinput", tf.qint32)
-    set_attr_dtype(quantize_down_node, "out_type", tf.quint8)
-    self.add_output_graph_node(quantize_down_node)
-    return quantize_down_name
+  def add_quantize_down_nodes(self, original_node, quantized_output_name):
+    quantized_outputs = [
+        quantized_output_name, quantized_output_name + ":1",
+        quantized_output_name + ":2"
+    ]
+    min_max_inputs = None
+    if self.should_merge_with_fake_quant_node():
+      # Use the inputs to the FakeQuantWithMinMaxVars node as the inputs to
+      # Requantize.
+      fake_quant_node = self.state.output_node_stack[-1][0]
+      min_max_inputs = [fake_quant_node.input[1], fake_quant_node.input[2]]
+      assert original_node.name not in self.state.merged_with_fake_quant
+      self.state.merged_with_fake_quant[original_node.name] = True
+    else:
+      # Add a RequantizationRange node for finding the min and max values.
+      requant_range_node = create_node(
+          "RequantizationRange", original_node.name + "_eightbit_requant_range",
+          quantized_outputs)
+      set_attr_dtype(requant_range_node, "Tinput", tf.qint32)
+      self.add_output_graph_node(requant_range_node)
+      min_max_inputs = [requant_range_node.name + ":0",
+                        requant_range_node.name + ":1"]
+    requantize_node = create_node(
+        "Requantize", original_node.name + "_eightbit_requantize",
+        quantized_outputs + min_max_inputs)
+    set_attr_dtype(requantize_node, "Tinput", tf.qint32)
+    set_attr_dtype(requantize_node, "out_type", tf.quint8)
+    self.add_output_graph_node(requantize_node)
+    return requantize_node.name
 
   def add_dequantize_result_node(self, quantized_output_name,
-                                 original_node_name):
+                                 original_node_name, min_tensor_index=1):
+    min_max_inputs = [
+        "%s:%s" % (quantized_output_name, min_tensor_index),
+        "%s:%s" % (quantized_output_name, (min_tensor_index + 1))]
     dequantize_name = original_node_name
-    dequantize_node = create_node("Dequantize", dequantize_name,
-                                  [quantized_output_name,
-                                   quantized_output_name + ":1",
-                                   quantized_output_name + ":2"])
+    if self.should_merge_with_fake_quant_node():
+      fake_quant_node = self.state.output_node_stack[-1][0]
+      if original_node_name not in self.state.merged_with_fake_quant:
+        min_max_inputs = [fake_quant_node.input[1], fake_quant_node.input[2]]
+        self.state.merged_with_fake_quant[original_node_name] = True
+      dequantize_name = fake_quant_node.name
+
+    dequantize_node = create_node(
+        "Dequantize", dequantize_name,
+        [quantized_output_name, min_max_inputs[0], min_max_inputs[1]])
     set_attr_dtype(dequantize_node, "T", tf.quint8)
     set_attr_string(dequantize_node, "mode", b"MIN_FIRST")
     self.add_output_graph_node(dequantize_node)
 
   def eightbitize_mat_mul_node(self, original_node):
     """Replaces a MatMul node with the eight bit equivalent sub-graph."""
-    quantized_mat_mul_name = original_node.name + "_eightbit_quantized_bias_add"
+    quantized_mat_mul_name = original_node.name + "_eightbit_quantized_mat_mul"
     all_input_names = self.add_eightbit_prologue_nodes(original_node)
     quantized_mat_mul_node = create_node(
         "QuantizedMatMul", quantized_mat_mul_name,
@@ -570,8 +705,8 @@ class GraphRewriter(object):
     copy_attr(quantized_mat_mul_node, "transpose_b",
               original_node.attr["transpose_b"])
     self.add_output_graph_node(quantized_mat_mul_node)
-    quantize_down_name = self.add_quantize_down_node(original_node,
-                                                     quantized_mat_mul_name)
+    quantize_down_name = self.add_quantize_down_nodes(original_node,
+                                                      quantized_mat_mul_name)
     self.add_dequantize_result_node(quantize_down_name, original_node.name)
 
   def eightbitize_conv_node(self, original_node):
@@ -586,8 +721,8 @@ class GraphRewriter(object):
     set_attr_dtype(quantized_conv_node, "Tfilter", tf.quint8)
     set_attr_dtype(quantized_conv_node, "out_type", tf.qint32)
     self.add_output_graph_node(quantized_conv_node)
-    quantize_down_name = self.add_quantize_down_node(original_node,
-                                                     quantized_conv_name)
+    quantize_down_name = self.add_quantize_down_nodes(original_node,
+                                                      quantized_conv_name)
     self.add_dequantize_result_node(quantize_down_name, original_node.name)
 
   def eightbitize_bias_add_node(self, original_node):
@@ -602,8 +737,8 @@ class GraphRewriter(object):
     set_attr_dtype(quantized_bias_add_node, "T2", tf.quint8)
     set_attr_dtype(quantized_bias_add_node, "out_type", tf.qint32)
     self.add_output_graph_node(quantized_bias_add_node)
-    quantize_down_name = self.add_quantize_down_node(original_node,
-                                                     quantized_bias_add_name)
+    quantize_down_name = self.add_quantize_down_nodes(original_node,
+                                                      quantized_bias_add_name)
     self.add_dequantize_result_node(quantize_down_name, original_node.name)
 
   def eightbitize_single_input_tensor_node(self, original_node,
@@ -743,6 +878,58 @@ class GraphRewriter(object):
     self.add_output_graph_node(quantized_concat_node)
     self.add_dequantize_result_node(quantized_concat_name, original_node.name)
 
+  def eightbitize_placeholder_node(self, current_node):
+    """Replaces a placeholder node with a quint8 placeholder node+dequantize."""
+    name = current_node.name
+
+    # Convert the placeholder into a quantized type.
+    output_node = tf.NodeDef()
+    output_node.CopyFrom(current_node)
+    set_attr_dtype(output_node, "dtype", tf.quint8)
+    output_node.name += "_original_input"
+    self.add_output_graph_node(output_node)
+
+    # Add a dequantize to convert back to float.
+    dequantize_node = create_node(
+        "Dequantize", name,
+        [output_node.name, "quantized_input_min_value",
+         "quantized_input_max_value"])
+    set_attr_dtype(dequantize_node, "T", tf.quint8)
+    set_attr_string(dequantize_node, "mode", b"MIN_FIRST")
+    self.add_output_graph_node(dequantize_node)
+
+    # For the descent over the graph to work, the dequantize node must be named
+    # current_node.name.  However, for the feeding of the graph to work, the
+    # placeholder must have the name current_node.name; so record a final set
+    # of renames to apply after all processing has been done.
+    self.final_node_renames[output_node.name] = name
+    self.final_node_renames[dequantize_node.name] = name + "_dequantize"
+
+  def eightbitize_reshape_node(self, original_node):
+    """Replaces a Reshape node with the eight bit equivalent sub-graph.
+
+    Args:
+      original_node: Float node to be converted.
+
+    Returns:
+      Subgraph representing the quantized version of the original node.
+
+    """
+    namespace_prefix = original_node.name + "_eightbit"
+    quantized_reshape_name = namespace_prefix + "_quantized_reshape"
+    reshape_dims_name, reduction_dims_name = self.add_common_quantization_nodes(
+        namespace_prefix)
+    shape_input_name = original_node.input[1]
+    quantize_input_name, min_input_name, max_input_name = (
+        self.eightbitize_input_to_node(namespace_prefix, original_node.input[0],
+                                       reshape_dims_name, reduction_dims_name))
+    quantized_reshape_node = create_node(
+        "QuantizedReshape", quantized_reshape_name,
+        [quantize_input_name, shape_input_name, min_input_name, max_input_name])
+    set_attr_dtype(quantized_reshape_node, "T", tf.quint8)
+    self.add_output_graph_node(quantized_reshape_node)
+    self.add_dequantize_result_node(quantized_reshape_name, original_node.name)
+
   def eightbitize_batch_norm_node(self, original_node):
     """Replaces a MatMul node with the eight bit equivalent sub-graph."""
     namespace_prefix = original_node.name + "_eightbit"
@@ -784,8 +971,8 @@ class GraphRewriter(object):
     copy_attr(quantized_batch_norm_node, "variance_epsilon",
               original_node.attr["variance_epsilon"])
     self.add_output_graph_node(quantized_batch_norm_node)
-    quantize_down_name = self.add_quantize_down_node(original_node,
-                                                     quantized_batch_norm_name)
+    quantize_down_name = self.add_quantize_down_nodes(original_node,
+                                                      quantized_batch_norm_name)
     self.add_dequantize_result_node(quantize_down_name, original_node.name)
 
   def add_output_graph_node(self, output_node):
@@ -894,6 +1081,21 @@ class GraphRewriter(object):
       self.add_output_graph_node(node)
     return self.output_graph
 
+  def apply_final_node_renames(self):
+    """Applies node renames in self.final_node_renames to self.output_graph."""
+    old_graph = self.output_graph
+    self.output_graph = tf.GraphDef()
+    for node in old_graph.node:
+      node.name = self.final_node_renames.get(node.name, node.name)
+      for index, input_name in enumerate(node.input):
+        node_name = node_name_from_input(input_name)
+        input_full_name = ensure_tensor_name_has_port(input_name)
+        if node_name in self.final_node_renames:
+          node.input[index] = "%s%s" % (self.final_node_renames[node_name],
+                                        input_full_name[len(node_name):])
+      self.add_output_graph_node(node)
+    return self.output_graph
+
   def remove_dead_nodes(self, output_names):
     """Removes nodes that are no longer needed for inference from the graph."""
     old_output_graph = self.output_graph
@@ -980,7 +1182,12 @@ def main(unused_args):
   with graph.as_default():
     tf.import_graph_def(tf_graph, input_map={}, name="")
 
-  rewriter = GraphRewriter(tf_graph, FLAGS.mode)
+  quantized_input_range = None
+  if FLAGS.quantized_input:
+    quantized_input_range = [FLAGS.quantized_input_min,
+                             FLAGS.quantized_input_max]
+
+  rewriter = GraphRewriter(tf_graph, FLAGS.mode, quantized_input_range)
 
   output_graph = rewriter.rewrite(FLAGS.output_node_names.split(","))
 

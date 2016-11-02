@@ -1,48 +1,79 @@
-Bijector which computes Y = g(X; loc, scale) = scale * X + loc.
+Bijector which computes Y = g(X; shift, scale) = matmul(scale, X) + shift.
+
+`scale` is either a non-zero scalar, or a lower triangular matrix with
+non-zero diagonal.  This means the `Bijector` will be invertible and
+computation of determinant and inverse will be efficient.
+
+As a result, the mean and covariance are transformed:
+
+```
+E[Y] = matmul(scale, E[X])
+Cov[Y] = matmul(scale, matmul(Cov[X], scale, transpose_b=True))
+```
 
 Example Use:
 
 ```python
-# No batch, scalar.
+# No batch, scalar
 mu = 0     # shape=[]
-sigma = 1  # shape=[]
-b = ScaleAndShift(loc=mu, scale=sigma)
+sigma = 1  # shape=[], treated like a 1x1 matrix.
+b = ScaleAndShift(shift=mu, scale=sigma)
 # b.shaper.batch_ndims == 0
 # b.shaper.event_ndims == 0
 
 # One batch, scalar.
 mu = ...    # shape=[b], b>0
-sigma = ... # shape=[b], b>0
-b = ScaleAndShift(loc=mu, scale=sigma)
+sigma = ... # shape=[b], b>0, treated like a batch of 1x1 matrices
+b = ScaleAndShift(shift=mu, scale=sigma)
 # b.shaper.batch_ndims == 1
 # b.shaper.event_ndims == 0
 
 # No batch, multivariate.
 mu = ...    # shape=[d],    d>0
-sigma = ... # shape=[d, d], d>0
-b = ScaleAndShift(loc=mu, scale=sigma, event_ndims=1)
+sigma = ... # shape=[d, d], d>0, treated like a single dxd matrix.
+b = ScaleAndShift(shift=mu, scale=sigma, event_ndims=1)
 # b.shaper.batch_ndims == 0
 # b.shaper.event_ndims == 1
 
 # (B1*B2*...*Bb)-batch, multivariate.
 mu = ...    # shape=[B1,...,Bb, d],    b>0, d>0
 sigma = ... # shape=[B1,...,Bb, d, d], b>0, d>0
-b = ScaleAndShift(loc=mu, scale=sigma, event_ndims=1)
+b = ScaleAndShift(shift=mu, scale=sigma, event_ndims=1)
 # b.shaper.batch_ndims == b
 # b.shaper.event_ndims == 1
 
 # Mu is broadcast:
 mu = 1
 sigma = [I, I]  # I is a 3x3 identity matrix.
-b = ScaleAndShift(loc=mu, scale=sigma, event_ndims=1)
+b = ScaleAndShift(shift=mu, scale=sigma, event_ndims=1)
 x = numpy.ones(S + sigma.shape)
 b.forward(x) # == x + 1
 ```
 - - -
 
-#### `tf.contrib.distributions.bijector.ScaleAndShift.__init__(loc, scale, event_ndims=0, validate_args=False, name='ScaleAndShift')` {#ScaleAndShift.__init__}
+#### `tf.contrib.distributions.bijector.ScaleAndShift.__init__(shift, scale, event_ndims=0, validate_args=False, name='scale_and_shift')` {#ScaleAndShift.__init__}
+
+Instantiates the `ScaleAndShift` bijector.
+
+This `Bijector` is initialized with `scale` and `shift` `Tensors`, giving
+the forward operation:
+
+```Y = g(X) = matmul(scale, X) + shift```
+
+##### Args:
 
 
+*  <b>`shift`</b>: Numeric `Tensor`.
+*  <b>`scale`</b>: Numeric `Tensor` of same `dtype` as `shift`.  If `event_ndims = 0`,
+    `scale` is treated like a `1x1` matrix or a batch thereof.
+    Otherwise, the last two dimensions of `scale` define a matrix.
+    `scale` must have non-negative diagonal entries.  The upper triangular
+    part of `scale` is ignored, effectively making it lower triangular.
+*  <b>`event_ndims`</b>: Scalar `int32` `Tensor` indicating the number of dimensions
+    associated with a particular draw from the distribution.  Must be 0 or 1
+*  <b>`validate_args`</b>: `Boolean` indicating whether arguments should be checked
+    for correctness.
+*  <b>`name`</b>: `String` name given to ops managed by this object.
 
 
 - - -
@@ -75,6 +106,32 @@ Returns the forward `Bijector` evaluation, i.e., X = g(Y).
 *  <b>`TypeError`</b>: if `self.dtype` is specified and `x.dtype` is not
     `self.dtype`.
 *  <b>`NotImplementedError`</b>: if `_forward` is not implemented.
+
+
+- - -
+
+#### `tf.contrib.distributions.bijector.ScaleAndShift.forward_log_det_jacobian(x, name='forward_log_det_jacobian', **condition_kwargs)` {#ScaleAndShift.forward_log_det_jacobian}
+
+Returns both the forward_log_det_jacobian.
+
+##### Args:
+
+
+*  <b>`x`</b>: `Tensor`. The input to the "forward" Jacobian evaluation.
+*  <b>`name`</b>: The name to give this op.
+*  <b>`**condition_kwargs`</b>: Named arguments forwarded to subclass implementation.
+
+##### Returns:
+
+  `Tensor`.
+
+##### Raises:
+
+
+*  <b>`TypeError`</b>: if `self.dtype` is specified and `y.dtype` is not
+    `self.dtype`.
+*  <b>`NotImplementedError`</b>: if neither `_forward_log_det_jacobian`
+    nor {`_inverse`, `_inverse_log_det_jacobian`} are implemented.
 
 
 - - -
@@ -179,13 +236,6 @@ Note: Jacobian is either constant for both forward and inverse or neither.
 
 - - -
 
-#### `tf.contrib.distributions.bijector.ScaleAndShift.loc` {#ScaleAndShift.loc}
-
-
-
-
-- - -
-
 #### `tf.contrib.distributions.bijector.ScaleAndShift.name` {#ScaleAndShift.name}
 
 Returns the string name of this `Bijector`.
@@ -210,6 +260,13 @@ Returns this `Bijector`'s parameters as a name/value dictionary.
 #### `tf.contrib.distributions.bijector.ScaleAndShift.shaper` {#ScaleAndShift.shaper}
 
 Returns shape object used to manage shape constraints.
+
+
+- - -
+
+#### `tf.contrib.distributions.bijector.ScaleAndShift.shift` {#ScaleAndShift.shift}
+
+
 
 
 - - -

@@ -249,7 +249,7 @@ class MonitorsTest(tf.test.TestCase):
       var = tf.Variable(0.0)
       var.initializer.run()
       tensor = tf.assign_add(var, 1.0)
-      summary_op = tf.scalar_summary('my_summary', tensor)
+      summary_op = tf.summary.scalar('my_summary', tensor)
       self._run_monitor(
           learn.monitors.SummarySaver(
               summary_op=summary_op, save_steps=8,
@@ -542,7 +542,8 @@ class CheckpointSaverTest(tf.test.TestCase):
         self.assertEqual(1, tf.contrib.framework.load_variable(
             self.model_dir, self.global_step.name))
 
-  def test_save_secs_saves_periodically(self):
+  # TODO(gunan): Reenable this test after b/32446874 is fixed.
+  def disabled_test_save_secs_saves_periodically(self):
     with self.graph.as_default():
       monitor = learn.monitors.CheckpointSaver(
           self.model_dir, save_secs=2, scaffold=self.scaffold)

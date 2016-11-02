@@ -21,6 +21,7 @@ from __future__ import print_function
 
 import itertools
 import os
+import tempfile
 
 import numpy as np
 import tensorflow as tf
@@ -136,6 +137,35 @@ class FeatureColumnTest(tf.test.TestCase):
       e1_value = e1.eval()
     for i in range(len(d1_value)):
       self.assertAllClose(d1_value[i], e1_value[i])
+
+  def testSharedEmbeddingColumnDeterminism(self):
+    # Tests determinism in auto-generated shared_embedding_name.
+    sparse_id_columns = tuple([
+        tf.contrib.layers.sparse_column_with_keys(k, ["foo", "bar"])
+        for k in ["07", "02", "00", "03", "05", "01", "09", "06", "04", "08"]
+    ])
+    output = tf.contrib.layers.shared_embedding_columns(
+        sparse_id_columns, dimension=2, combiner="mean")
+    self.assertEqual(len(output), 10)
+    for x in output:
+      self.assertEqual(x.shared_embedding_name,
+                       "00_01_02_plus_7_others_shared_embedding")
+
+  def testSharedEmbeddingColumnErrors(self):
+    # Tries passing in a string.
+    with self.assertRaises(TypeError):
+      invalid_string = "Invalid string."
+      tf.contrib.layers.shared_embedding_columns(
+          invalid_string, dimension=2, combiner="mean")
+
+    # Tries passing in a set of sparse columns.
+    with self.assertRaises(TypeError):
+      invalid_set = set([
+          tf.contrib.layers.sparse_column_with_keys("a", ["foo", "bar"]),
+          tf.contrib.layers.sparse_column_with_keys("b", ["foo", "bar"]),
+      ])
+      tf.contrib.layers.shared_embedding_columns(
+          invalid_set, dimension=2, combiner="mean")
 
   def testOneHotColumn(self):
     a = tf.contrib.layers.sparse_column_with_keys("a", ["a", "b", "c", "d"])
@@ -399,6 +429,11 @@ class FeatureColumnTest(tf.test.TestCase):
                                                                10,
                                                                dtype=tf.float32)
 
+  def testSparseColumnSingleBucket(self):
+    sc = tf.contrib.layers.sparse_column_with_integerized_feature("sc", 1)
+    self.assertDictEqual({"sc": tf.VarLenFeature(dtype=tf.int64)}, sc.config)
+    self.assertEqual(1, sc._wide_embedding_lookup_arguments(None).vocab_size)
+
   def testCreateFeatureSpec(self):
     sparse_col = tf.contrib.layers.sparse_column_with_hash_bucket(
         "sparse_column", hash_bucket_size=100)
@@ -575,7 +610,10 @@ class FeatureColumnTest(tf.test.TestCase):
             {embedding_col: input_tensor}, [embedding_col])
 
     save = tf.train.Saver()
-    checkpoint_path = os.path.join(self.get_temp_dir(), "model.ckpt")
+    ckpt_dir_prefix = os.path.join(
+        self.get_temp_dir(), "init_embedding_col_w_from_ckpt")
+    ckpt_dir = tempfile.mkdtemp(prefix=ckpt_dir_prefix)
+    checkpoint_path = os.path.join(ckpt_dir, "model.ckpt")
 
     with self.test_session() as sess:
       sess.run(tf.initialize_all_variables())
@@ -636,7 +674,10 @@ class FeatureColumnTest(tf.test.TestCase):
           assign_op = tf.assign(weight[0], weight[0] + 0.5)
 
     save = tf.train.Saver()
-    checkpoint_path = os.path.join(self.get_temp_dir(), "model.ckpt")
+    ckpt_dir_prefix = os.path.join(
+        self.get_temp_dir(), "init_crossed_col_w_from_ckpt")
+    ckpt_dir = tempfile.mkdtemp(prefix=ckpt_dir_prefix)
+    checkpoint_path = os.path.join(ckpt_dir, "model.ckpt")
 
     with self.test_session() as sess:
       sess.run(tf.initialize_all_variables())

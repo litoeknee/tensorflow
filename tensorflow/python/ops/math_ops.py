@@ -24,8 +24,10 @@ operators to your graph.
 @@add
 @@sub
 @@mul
+@@multiply
 @@scalar_mul
 @@div
+@@divide
 @@truediv
 @@floordiv
 @@mod
@@ -39,6 +41,7 @@ mathematical functions to your graph.
 @@add_n
 @@abs
 @@neg
+@@negative
 @@sign
 @@inv
 @@square
@@ -137,6 +140,7 @@ common math computations that reduce various dimensions of a tensor.
 @@reduce_all
 @@reduce_any
 @@reduce_logsumexp
+@@count_nonzero
 
 @@accumulate_n
 
@@ -213,6 +217,7 @@ from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import graph_util
 from tensorflow.python.framework import ops
+from tensorflow.python.framework import sparse_tensor
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import gen_control_flow_ops
@@ -254,18 +259,31 @@ def abs(x, name=None):
       values.
   """
   with ops.name_scope(name, "Abs", [x]) as name:
-    if isinstance(x, ops.SparseTensor):
+    if isinstance(x, sparse_tensor.SparseTensor):
       if x.values.dtype in (dtypes.complex64, dtypes.complex128):
         x_abs = gen_math_ops.complex_abs(x.values,
             Tout=x.values.dtype.real_dtype, name=name)
-        return ops.SparseTensor(indices=x.indices, values=x_abs, shape=x.shape)
+        return sparse_tensor.SparseTensor(
+            indices=x.indices, values=x_abs, shape=x.shape)
       x_abs = gen_math_ops._abs(x.values, name=name)
-      return ops.SparseTensor(indices=x.indices, values=x_abs, shape=x.shape)
+      return sparse_tensor.SparseTensor(
+          indices=x.indices, values=x_abs, shape=x.shape)
     else:
       x = ops.convert_to_tensor(x, name="x")
       if x.dtype in (dtypes.complex64, dtypes.complex128):
         return gen_math_ops.complex_abs(x, Tout=x.dtype.real_dtype, name=name)
       return gen_math_ops._abs(x, name=name)
+
+
+def divide(x, y, name=None):
+  """Computes Python style division of `x` by `y`."""
+  with ops.name_scope(name, "Divide", [x]) as name:
+    return x / y
+
+# Make Python Aliases
+multiply = gen_math_ops.mul
+subtract = gen_math_ops.sub
+negative = gen_math_ops.neg
 
 
 def neg(x, name=None):
@@ -282,9 +300,10 @@ def neg(x, name=None):
     A `Tensor` or `SparseTensor`, respectively. Has the same type as `x`.
   """
   with ops.name_scope(name, "Neg", [x]) as name:
-    if isinstance(x, ops.SparseTensor):
+    if isinstance(x, sparse_tensor.SparseTensor):
       x_neg = gen_math_ops.neg(x.values, name=name)
-      return ops.SparseTensor(indices=x.indices, values=x_neg, shape=x.shape)
+      return sparse_tensor.SparseTensor(
+          indices=x.indices, values=x_neg, shape=x.shape)
     else:
       return gen_math_ops.neg(x, name=name)
 
@@ -305,9 +324,10 @@ def sign(x, name=None):
     A `Tensor` or `SparseTensor`, respectively. Has the same type as `x`.
   """
   with ops.name_scope(name, "Sign", [x]) as name:
-    if isinstance(x, ops.SparseTensor):
+    if isinstance(x, sparse_tensor.SparseTensor):
       x_sign = gen_math_ops.sign(x.values, name=name)
-      return ops.SparseTensor(indices=x.indices, values=x_sign, shape=x.shape)
+      return sparse_tensor.SparseTensor(
+          indices=x.indices, values=x_sign, shape=x.shape)
     else:
       return gen_math_ops.sign(x, name=name)
 
@@ -326,9 +346,10 @@ def square(x, name=None):
     A `Tensor` or `SparseTensor`. Has the same type as `x`.
   """
   with ops.name_scope(name, "Square", [x]) as name:
-    if isinstance(x, ops.SparseTensor):
+    if isinstance(x, sparse_tensor.SparseTensor):
       x_square = gen_math_ops.square(x.values, name=name)
-      return ops.SparseTensor(indices=x.indices, values=x_square, shape=x.shape)
+      return sparse_tensor.SparseTensor(
+          indices=x.indices, values=x_square, shape=x.shape)
     else:
       return gen_math_ops.square(x, name=name)
 
@@ -347,9 +368,10 @@ def sqrt(x, name=None):
     A `Tensor` or `SparseTensor`, respectively. Has the same type as `x`.
   """
   with ops.name_scope(name, "Sqrt", [x]) as name:
-    if isinstance(x, ops.SparseTensor):
+    if isinstance(x, sparse_tensor.SparseTensor):
       x_sqrt = gen_math_ops.sqrt(x.values, name=name)
-      return ops.SparseTensor(indices=x.indices, values=x_sqrt, shape=x.shape)
+      return sparse_tensor.SparseTensor(
+          indices=x.indices, values=x_sqrt, shape=x.shape)
     else:
       return gen_math_ops.sqrt(x, name=name)
 
@@ -366,9 +388,10 @@ def erf(x, name=None):
     A `Tensor` or `SparseTensor`, respectively. Has the same type as `x`.
   """
   with ops.name_scope(name, "Erf", [x]) as name:
-    if isinstance(x, ops.SparseTensor):
+    if isinstance(x, sparse_tensor.SparseTensor):
       x_erf = gen_math_ops.erf(x.values, name=name)
-      return ops.SparseTensor(indices=x.indices, values=x_erf, shape=x.shape)
+      return sparse_tensor.SparseTensor(
+          indices=x.indices, values=x_erf, shape=x.shape)
     else:
       return gen_math_ops.erf(x, name=name)
 
@@ -609,9 +632,9 @@ def cast(x, dtype, name=None):
   """
   base_type = dtypes.as_dtype(dtype).base_dtype
   with ops.name_scope(name, "Cast", [x]) as name:
-    if isinstance(x, ops.SparseTensor):
+    if isinstance(x, sparse_tensor.SparseTensor):
       values_cast = cast(x.values, base_type, name=name)
-      return ops.SparseTensor(x.indices, values_cast, x.shape)
+      return sparse_tensor.SparseTensor(x.indices, values_cast, x.shape)
     else:
       # TODO(touts): Handle what Josh said.
       #
@@ -754,16 +777,17 @@ def _OverrideBinaryOperatorHelper(func, op_name, clazz_object=ops.Tensor):
   """
   def binary_op_wrapper(x, y):
     with ops.name_scope(None, op_name, [x, y]) as name:
-      if not isinstance(y, ops.SparseTensor):
+      if not isinstance(y, sparse_tensor.SparseTensor):
         y = ops.convert_to_tensor(y, dtype=x.dtype.base_dtype, name="y")
       return func(x, y, name=name)
 
   def binary_op_wrapper_sparse(sp_x, y):
     with ops.name_scope(None, op_name, [sp_x, y]) as name:
       y = ops.convert_to_tensor(y, dtype=sp_x.dtype.base_dtype, name="y")
-      return ops.SparseTensor(sp_x.indices, func(sp_x.indices, sp_x.values,
-                                                 sp_x.shape, y, name=name),
-                              sp_x.shape)
+      return sparse_tensor.SparseTensor(
+          sp_x.indices, func(sp_x.indices, sp_x.values,
+                             sp_x.shape, y, name=name),
+          sp_x.shape)
 
   def r_binary_op_wrapper(y, x):
     with ops.name_scope(None, op_name, [x, y]) as name:
@@ -908,6 +932,8 @@ def floordiv(x, y, name=None):
     else:
       if not dtype.is_integer:
         raise TypeError("Expected floating point or integer, got %r" % dtype)
+      # TODO(aselle): Switch to math_ops.floor_div() when ready
+      # return gen_math_ops.floor_div(x, y, name=name)
       return gen_math_ops.div(x, y, name=name)
 
 
@@ -917,18 +943,18 @@ def _mul_dispatch(x, y, name=None):
   if is_tensor_y:
     return gen_math_ops.mul(x, y, name=name)
   else:
-    assert isinstance(y, ops.SparseTensor)  # Case: Dense * Sparse.
+    assert isinstance(y, sparse_tensor.SparseTensor)  # Case: Dense * Sparse.
     new_vals = gen_sparse_ops.sparse_dense_cwise_mul(y.indices, y.values,
                                                      y.shape, x, name)
-    return ops.SparseTensor(y.indices, new_vals, y.shape)
+    return sparse_tensor.SparseTensor(y.indices, new_vals, y.shape)
 
 
 _OverrideBinaryOperatorHelper(gen_sparse_ops.sparse_dense_cwise_div, "div",
-                              ops.SparseTensor)
+                              sparse_tensor.SparseTensor)
 _OverrideBinaryOperatorHelper(_sparse_dense_truediv, "truediv",
-                              ops.SparseTensor)
+                              sparse_tensor.SparseTensor)
 _OverrideBinaryOperatorHelper(gen_sparse_ops.sparse_dense_cwise_mul, "mul",
-                              ops.SparseTensor)
+                              sparse_tensor.SparseTensor)
 
 
 _OverrideBinaryOperatorHelper(gen_math_ops.add, "add")
@@ -937,6 +963,8 @@ _OverrideBinaryOperatorHelper(_mul_dispatch, "mul")
 _OverrideBinaryOperatorHelper(gen_math_ops.div, "div")
 _OverrideBinaryOperatorHelper(truediv, "truediv")
 _OverrideBinaryOperatorHelper(floordiv, "floordiv")
+# TODO(aselle): Switch mod to floor_mod when ready
+# _OverrideBinaryOperatorHelper(gen_math_ops.floor_mod, "mod")
 _OverrideBinaryOperatorHelper(gen_math_ops.mod, "mod")
 _OverrideBinaryOperatorHelper(pow, "pow")
 
@@ -1041,7 +1069,7 @@ def _ReductionDims(x, reduction_indices):
     if isinstance(x, ops.Tensor) and x.get_shape().ndims is not None:
       return constant_op.constant(np.arange(x.get_shape().ndims),
                                   dtype=dtypes.int32)
-    if (isinstance(x, ops.SparseTensor) and
+    if (isinstance(x, sparse_tensor.SparseTensor) and
         x.shape.get_shape().is_fully_defined()):
       rank = x.shape.get_shape()[0].value  # sparse.shape is an 1-D tensor.
       return constant_op.constant(np.arange(rank), dtype=dtypes.int32)
@@ -1087,6 +1115,57 @@ def reduce_sum(input_tensor, reduction_indices=None, keep_dims=False,
   return gen_math_ops._sum(input_tensor, _ReductionDims(input_tensor,
                                                         reduction_indices),
                            keep_dims, name=name)
+
+
+def count_nonzero(input_tensor, reduction_indices=None, keep_dims=False,
+                  dtype=dtypes.int64, name=None):
+  """Computes number of nonzero elements across dimensions of a tensor.
+
+  Reduces `input_tensor` along the dimensions given in `reduction_indices`.
+  Unless `keep_dims` is true, the rank of the tensor is reduced by 1 for each
+  entry in `reduction_indices`. If `keep_dims` is true, the reduced dimensions
+  are retained with length 1.
+
+  If `reduction_indices` has no entries, all dimensions are reduced, and a
+  tensor with a single element is returned.
+
+  **NOTE** Floating point comparison to zero is done by exact floating point
+  equality check.  Small values are **not** rounded to zero for purposes of
+  the nonzero check.
+
+  For example:
+
+  ```python
+  # 'x' is [[0, 1, 0]
+  #         [1, 1, 0]]
+  tf.count_nonzero(x) ==> 3
+  tf.count_nonzero(x, 0) ==> [1, 2, 0]
+  tf.count_nonzero(x, 1) ==> [1, 2]
+  tf.count_nonzero(x, 1, keep_dims=True) ==> [[1], [2]]
+  tf.count_nonzero(x, [0, 1]) ==> 3
+  ```
+
+  Args:
+    input_tensor: The tensor to reduce. Should be of numeric type, or `bool`.
+    reduction_indices: The dimensions to reduce. If `None` (the default),
+      reduces all dimensions.
+    keep_dims: If true, retains reduced dimensions with length 1.
+    dtype: The output dtype; defaults to `tf.int64`.
+    name: A name for the operation (optional).
+
+  Returns:
+    The reduced tensor (number of nonzero values).
+  """
+  with ops.name_scope(name, "count_nonzero", [input_tensor]):
+    input_tensor = ops.convert_to_tensor(input_tensor, name="input_tensor")
+    zero = input_tensor.dtype.as_numpy_dtype()
+    return cast(
+        reduce_sum(
+            # int64 reduction happens on GPU
+            to_int64(gen_math_ops.not_equal(input_tensor, zero)),
+            reduction_indices=reduction_indices,
+            keep_dims=keep_dims),
+        dtype=dtype)
 
 
 def reduce_mean(input_tensor, reduction_indices=None, keep_dims=False,
@@ -1464,19 +1543,6 @@ def _calc_mat_mul_flops(graph, node):
   return ops.OpStats("flops", (k * output_count * 2))
 
 
-@ops.RegisterStatistics("MatMul", "weight_parameters")
-def _calc_mat_mul_weight_parameters(graph, node):
-  """Calculates the on-disk size of the weights for MatMul."""
-  # We assume here that the weights are always in the second input to the op,
-  # which is generally true by convention for fully-connected layers, but not
-  # enforced or checked.
-  weights_shape = graph_util.tensor_shape_from_node_def_name(graph,
-                                                             node.input[1])
-  weights_shape.assert_is_fully_defined()
-  return ops.OpStats("weight_parameters",
-                     (int(weights_shape[1]) * int(weights_shape[0])))
-
-
 def _as_indexed_slices(x, optimize=True):
   """Convert 'x' to IndexedSlices.
 
@@ -1668,9 +1734,10 @@ def tanh(x, name=None):
     `x.dtype != qint32` otherwise the return type is `quint8`.
   """
   with ops.name_scope(name, "Tanh", [x]) as name:
-    if isinstance(x, ops.SparseTensor):
+    if isinstance(x, sparse_tensor.SparseTensor):
       x_tanh = gen_math_ops._tanh(x.values, name=name)
-      return ops.SparseTensor(indices=x.indices, values=x_tanh, shape=x.shape)
+      return sparse_tensor.SparseTensor(
+          indices=x.indices, values=x_tanh, shape=x.shape)
     else:
       return gen_math_ops._tanh(x, name=name)
 
@@ -1733,7 +1800,7 @@ def cumprod(x, axis=0, exclusive=False, reverse=False, name=None):
   performed
   instead:
   ```prettyprint
-  tf.cumprod([a, b, c], exclusive=True) ==> [0, a, a * b]
+  tf.cumprod([a, b, c], exclusive=True) ==> [1, a, a * b]
   ```
 
   By setting the `reverse` kwarg to `True`, the cumprod is performed in the
@@ -1745,7 +1812,7 @@ def cumprod(x, axis=0, exclusive=False, reverse=False, name=None):
 
   The `reverse` and `exclusive` kwargs can also be combined:
   ```prettyprint
-  tf.cumprod([a, b, c], exclusive=True, reverse=True) ==> [b * c, c, 0]
+  tf.cumprod([a, b, c], exclusive=True, reverse=True) ==> [b * c, c, 1]
   ```
 
   Args:
@@ -1865,6 +1932,8 @@ ops.RegisterShape("LogicalOr")(common_shapes.call_cpp_shape_fn)
 ops.RegisterShape("Maximum")(common_shapes.call_cpp_shape_fn)
 ops.RegisterShape("Minimum")(common_shapes.call_cpp_shape_fn)
 ops.RegisterShape("Mod")(common_shapes.call_cpp_shape_fn)
+ops.RegisterShape("FloorMod")(common_shapes.call_cpp_shape_fn)
+ops.RegisterShape("FloorDiv")(common_shapes.call_cpp_shape_fn)
 ops.RegisterShape("Mul")(common_shapes.call_cpp_shape_fn)
 ops.RegisterShape("NotEqual")(common_shapes.call_cpp_shape_fn)
 ops.RegisterShape("Pow")(common_shapes.call_cpp_shape_fn)
@@ -1957,3 +2026,5 @@ def reduced_shape(input_shape, axes):
 
 
 ops.RegisterShape("QuantizedMatMul")(common_shapes.call_cpp_shape_fn)
+ops.RegisterShape("Requantize")(common_shapes.call_cpp_shape_fn)
+ops.RegisterShape("RequantizationRange")(common_shapes.call_cpp_shape_fn)

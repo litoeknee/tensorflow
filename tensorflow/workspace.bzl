@@ -14,8 +14,8 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
   # These lines need to be changed when updating Eigen. They are parsed from
   # this file by the cmake and make builds to determine the eigen version and
   # hash.
-  eigen_version = "97c1ebe6ccc2"
-  eigen_sha256 = "58ab9fa44391c850d783fe0867f42a00b5300293b7d73bbbbc8756c2e649fea2"
+  eigen_version = "1d454915237a"
+  eigen_sha256 = "7e05dd4b9866ef0aa4498be34752a362596cc5db2f8439cee111e4ea54046b57"
 
   native.new_http_archive(
     name = "eigen_archive",
@@ -34,9 +34,9 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
 
   native.http_archive(
     name = "gemmlowp",
-    url = "http://github.com/google/gemmlowp/archive/c0bacf11fb509a2cbe15a97362a2df067ffd57a2.tar.gz",
-    sha256 = "dc64a38f9927db18748d9024987c9b102115e25bc2be4b76aa8e422b8f83d882",
-    strip_prefix = "gemmlowp-c0bacf11fb509a2cbe15a97362a2df067ffd57a2",
+    url = "http://github.com/google/gemmlowp/archive/a6f29d8ac48d63293f845f2253eccbf86bc28321.tar.gz",
+    sha256 = "75d40ea8e68b0d1644f052fffe8f14a410b2a73d40ccb859a95c0578d194ec26",
+    strip_prefix = "gemmlowp-a6f29d8ac48d63293f845f2253eccbf86bc28321",
   )
 
   native.new_http_archive(
@@ -98,9 +98,9 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
 
   native.http_archive(
     name = "protobuf",
-    url = "http://github.com/google/protobuf/archive/c2b3e70efd2038a54ef8973771ac58192885125e.tar.gz",
-    sha256 = "eafc1bc4c27970d62effe64ba6610823fdd66711f440d8ca4a168167786a2fcb",
-    strip_prefix = "protobuf-c2b3e70efd2038a54ef8973771ac58192885125e",
+    url = "http://github.com/google/protobuf/archive/008b5a228b37c054f46ba478ccafa5e855cb16db.tar.gz",
+    sha256 = "2737ad055eb8a9bc63ed068e32c4ea280b62d8236578cb4d4120eb5543f759ab",
+    strip_prefix = "protobuf-008b5a228b37c054f46ba478ccafa5e855cb16db",
   )
 
   native.new_http_archive(
@@ -124,6 +124,22 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
   native.bind(
     name = "python_headers",
     actual = str(Label("//util/python:python_headers")),
+  )
+
+  native.new_http_archive(
+    name = "pcre",
+    sha256 = "ccdf7e788769838f8285b3ee672ed573358202305ee361cfec7a4a4fb005bbc7",
+    url = "http://ftp.exim.org/pub/pcre/pcre-8.39.tar.gz",
+    strip_prefix = "pcre-8.39",
+    build_file = str(Label("//third_party:pcre.BUILD")),
+  )
+
+  native.new_http_archive(
+    name = "swig",
+    sha256 = "58a475dbbd4a4d7075e5fe86d4e54c9edde39847cdb96a3053d87cb64a23a453",
+    url = "http://ufpr.dl.sourceforge.net/project/swig/swig/swig-3.0.8/swig-3.0.8.tar.gz",
+    strip_prefix = "swig-3.0.8",
+    build_file = str(Label("//third_party:swig.BUILD")),
   )
 
   # grpc expects //external:protobuf_clib and //external:protobuf_compiler

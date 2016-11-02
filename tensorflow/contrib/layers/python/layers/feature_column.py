@@ -74,14 +74,14 @@ from __future__ import print_function
 import abc
 import collections
 import math
+import six
 
-from tensorflow.contrib.framework.python.framework import deprecation
 from tensorflow.contrib.layers.python.layers import layers
 from tensorflow.contrib.layers.python.ops import bucketization_op
 from tensorflow.contrib.layers.python.ops import sparse_feature_cross_op
 from tensorflow.contrib.lookup import lookup_ops as contrib_lookup_ops
 from tensorflow.python.framework import dtypes
-from tensorflow.python.framework import ops
+from tensorflow.python.framework import sparse_tensor as sparse_tensor_py
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import math_ops
@@ -89,6 +89,7 @@ from tensorflow.python.ops import parsing_ops
 from tensorflow.python.ops import sparse_ops
 from tensorflow.python.ops import string_ops
 from tensorflow.python.platform import tf_logging as logging
+from tensorflow.python.util import deprecation
 
 
 class _LinearEmbeddingLookupArguments(
@@ -245,7 +246,7 @@ class _SparseColumn(_FeatureColumn,
     column_name: A string defining sparse column name.
     is_integerized: A bool if True means type of feature is an integer.
       Integerized means we can use the feature itself as id.
-    bucket_size: An int that is > 1. The number of buckets.
+    bucket_size: An int that is > 0. The number of buckets.
     lookup_config: A _SparseIdLookupConfig defining feature-to-id lookup
       configuration
     combiner: A string specifying how to reduce if the sparse column is
@@ -285,8 +286,8 @@ class _SparseColumn(_FeatureColumn,
       raise ValueError("one and only one of bucket_size or lookup_config "
                        "must be set. column_name: {}".format(column_name))
 
-    if bucket_size is not None and bucket_size < 2:
-      raise ValueError("bucket_size must be at least 2. "
+    if bucket_size is not None and bucket_size < 1:
+      raise ValueError("bucket_size must be at least 1. "
                        "bucket_size: {}, column_name: {}".format(bucket_size,
                                                                  column_name))
 
@@ -389,7 +390,7 @@ class _SparseColumnIntegerized(_SparseColumn):
     sparse_id_values = math_ops.mod(columns_to_tensors[self.name].values,
                                     self.bucket_size,
                                     name="mod")
-    columns_to_tensors[self] = ops.SparseTensor(
+    columns_to_tensors[self] = sparse_tensor_py.SparseTensor(
         columns_to_tensors[self.name].indices, sparse_id_values,
         columns_to_tensors[self.name].shape)
 
@@ -463,7 +464,7 @@ class _SparseColumnHashed(_SparseColumn):
 
     sparse_id_values = string_ops.string_to_hash_bucket_fast(
         sparse_values, self.bucket_size, name="lookup")
-    columns_to_tensors[self] = ops.SparseTensor(
+    columns_to_tensors[self] = sparse_tensor_py.SparseTensor(
         sparse_tensor.indices, sparse_id_values, sparse_tensor.shape)
 
 
@@ -957,13 +958,18 @@ def shared_embedding_columns(sparse_id_columns,
   Raises:
     ValueError: if sparse_id_columns is empty, or its elements are not
       compatible with each other.
-    TypeError: if at least one element of sparse_id_columns is not a
-      `SparseTensor`.
+    TypeError: if `sparse_id_columns` is not a sequence or is a string. If at
+      least one element of `sparse_id_columns` is not a `SparseTensor`.
   """
   if combiner is None:
     logging.warn("The default value of combiner will change from \"mean\" "
                  "to \"sqrtn\" after 2016/11/01.")
     combiner = "mean"
+  if (not isinstance(sparse_id_columns, collections.Sequence) or
+      isinstance(sparse_id_columns, six.string_types)):
+    raise TypeError(
+        "sparse_id_columns must be a non-string sequence (ex: list or tuple) "
+        "instead of type {}.".format(type(sparse_id_columns)))
   if len(sparse_id_columns) < 1:
     raise ValueError("The input sparse_id_columns should have at least one "
                      "element.")
@@ -972,8 +978,6 @@ def shared_embedding_columns(sparse_id_columns,
       raise TypeError("Elements of sparse_id_columns must be _SparseColumn, but"
                       "{} is not.".format(sparse_id_column))
 
-  if not isinstance(sparse_id_columns, list):
-    sparse_id_columns = list(sparse_id_columns)
   if len(sparse_id_columns) == 1:
     return [
         _EmbeddingColumn(sparse_id_columns[0], dimension, combiner, initializer,
@@ -988,14 +992,17 @@ def shared_embedding_columns(sparse_id_columns,
       raise ValueError("The input sparse id columns are not compatible.")
     # Construct the shared name and size for shared embedding space.
     if not shared_embedding_name:
-      if len(sparse_id_columns) <= 3:
+      # Sort the columns so that shared_embedding_name will be deterministic
+      # even if users pass in unsorted columns from a dict or something.
+      sorted_columns = sorted(sparse_id_columns)
+      if len(sorted_columns) <= 3:
         shared_embedding_name = "_".join([column.name
-                                          for column in sparse_id_columns])
+                                          for column in sorted_columns])
       else:
         shared_embedding_name = "_".join([column.name
-                                          for column in sparse_id_columns[0:3]])
+                                          for column in sorted_columns[0:3]])
         shared_embedding_name += (
-            "_plus_{}_others".format(len(sparse_id_columns)-3))
+            "_plus_{}_others".format(len(sorted_columns)-3))
       shared_embedding_name += "_shared_embedding"
     shared_vocab_size = sparse_id_columns[0].length
 
@@ -1445,7 +1452,8 @@ class _BucketizedColumn(_FeatureColumn, collections.namedtuple(
 
     indices = math_ops.to_int64(array_ops.transpose(array_ops.pack((i1, i2))))
     shape = math_ops.to_int64(array_ops.pack([batch_size, dimension]))
-    sparse_id_values = ops.SparseTensor(indices, bucket_indices, shape)
+    sparse_id_values = sparse_tensor_py.SparseTensor(
+        indices, bucket_indices, shape)
 
     return sparse_id_values
 
