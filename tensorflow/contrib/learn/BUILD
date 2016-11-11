@@ -291,7 +291,9 @@ py_test(
     deps = [
         ":learn",
         "//tensorflow:tensorflow_py",
+        "//tensorflow/python:extra_py_tests_deps",
         "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python:test_ops",
     ],
 )
 
@@ -411,10 +413,6 @@ py_test(
     srcs = ["python/learn/estimators/dnn_test.py"],
     shard_count = 4,
     srcs_version = "PY2AND3",
-    tags = [
-        "manual",  # http://b/31934515
-        "notap",
-    ],
     deps = [
         ":learn",
         "//tensorflow:tensorflow_py",

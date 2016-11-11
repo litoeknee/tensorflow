@@ -121,6 +121,16 @@ TEST(GcsFileSystemTest, NewRandomAccessFile_WithReadAhead) {
        new FakeHttpRequest(
            "Uri: https://bucket.storage.googleapis.com/random_access.txt\n"
            "Auth Token: fake_token\n"
+           "Range: 7-21\n",
+           "789abcdef"),
+       new FakeHttpRequest(
+           "Uri: https://bucket.storage.googleapis.com/random_access.txt\n"
+           "Auth Token: fake_token\n"
+           "Range: 20-34\n",
+           ""),
+       new FakeHttpRequest(
+           "Uri: https://bucket.storage.googleapis.com/random_access.txt\n"
+           "Auth Token: fake_token\n"
            "Range: 0-14\n",
            "01234567")});
   GcsFileSystem fs(std::unique_ptr<AuthProvider>(new FakeAuthProvider),
@@ -155,16 +165,14 @@ TEST(GcsFileSystemTest, NewRandomAccessFile_WithReadAhead) {
   EXPECT_EQ("6789abcd", result);
 
   // The range cannot be satisfied, and the requested offset lies within the
-  // buffer. No additional requests will be made as the EOF was reached in
-  // the last request.
+  // buffer, but the end of the range is outside of the buffer.
+  // A new request will be made to read 10 + 5 = 15 bytes.
   EXPECT_EQ(errors::Code::OUT_OF_RANGE,
             file->Read(7, 10, &result, scratch).code());
-  EXPECT_EQ("789abcd", result);
+  EXPECT_EQ("789abcdef", result);
 
   // The range cannot be satisfied, and the requested offset is greater than the
-  // buffered range. No additional requests will be made as the EOF was reached
-  // in
-  // the last request.
+  // buffered range. A new request will be made to read 10 + 5 = 15 bytes.
   EXPECT_EQ(errors::Code::OUT_OF_RANGE,
             file->Read(20, 10, &result, scratch).code());
   EXPECT_TRUE(result.empty());
@@ -496,7 +504,7 @@ TEST(GcsFileSystemTest, FileExists_YesAsObject) {
                        new FakeHttpRequestFactory(&requests)),
                    0 /* read ahead bytes */, 5 /* max upload attempts */);
 
-  EXPECT_TRUE(fs.FileExists("gs://bucket/path/file1.txt"));
+  TF_EXPECT_OK(fs.FileExists("gs://bucket/path/file1.txt"));
 }
 
 TEST(GcsFileSystemTest, FileExists_YesAsFolder) {
@@ -518,7 +526,7 @@ TEST(GcsFileSystemTest, FileExists_YesAsFolder) {
                        new FakeHttpRequestFactory(&requests)),
                    0 /* read ahead bytes */, 5 /* max upload attempts */);
 
-  EXPECT_TRUE(fs.FileExists("gs://bucket/path/subfolder"));
+  TF_EXPECT_OK(fs.FileExists("gs://bucket/path/subfolder"));
 }
 
 TEST(GcsFileSystemTest, FileExists_YesAsBucket) {
@@ -536,8 +544,8 @@ TEST(GcsFileSystemTest, FileExists_YesAsBucket) {
                        new FakeHttpRequestFactory(&requests)),
                    0 /* read ahead bytes */, 5 /* max upload attempts */);
 
-  EXPECT_TRUE(fs.FileExists("gs://bucket1"));
-  EXPECT_TRUE(fs.FileExists("gs://bucket1/"));
+  TF_EXPECT_OK(fs.FileExists("gs://bucket1"));
+  TF_EXPECT_OK(fs.FileExists("gs://bucket1/"));
 }
 
 TEST(GcsFileSystemTest, FileExists_NotAsObjectOrFolder) {
@@ -558,7 +566,8 @@ TEST(GcsFileSystemTest, FileExists_NotAsObjectOrFolder) {
                        new FakeHttpRequestFactory(&requests)),
                    0 /* read ahead bytes */, 5 /* max upload attempts */);
 
-  EXPECT_FALSE(fs.FileExists("gs://bucket/path/file1.txt"));
+  EXPECT_EQ(errors::Code::NOT_FOUND,
+            fs.FileExists("gs://bucket/path/file1.txt").code());
 }
 
 TEST(GcsFileSystemTest, FileExists_NotAsBucket) {
@@ -575,8 +584,10 @@ TEST(GcsFileSystemTest, FileExists_NotAsBucket) {
                    std::unique_ptr<HttpRequest::Factory>(
                        new FakeHttpRequestFactory(&requests)),
                    0 /* read ahead bytes */, 5 /* max upload attempts */);
-  EXPECT_FALSE(fs.FileExists("gs://bucket2/"));
-  EXPECT_FALSE(fs.FileExists("gs://bucket2"));
+  EXPECT_EQ(errors::Code::INVALID_ARGUMENT,
+            fs.FileExists("gs://bucket2/").code());
+  EXPECT_EQ(errors::Code::INVALID_ARGUMENT,
+            fs.FileExists("gs://bucket2").code());
 }
 
 TEST(GcsFileSystemTest, GetChildren_NoItems) {
@@ -767,8 +778,9 @@ TEST(GcsFileSystemTest, GetMatchingPaths_BucketAndWildcard) {
 
   std::vector<string> result;
   TF_EXPECT_OK(fs.GetMatchingPaths("gs://bucket/*/*", &result));
-  EXPECT_EQ(std::vector<string>(
-                {"gs://bucket/path/file1.txt", "gs://bucket/path/file3.txt"}),
+  EXPECT_EQ(std::vector<string>({"gs://bucket/path/file1.txt",
+                                 "gs://bucket/path/file3.txt",
+                                 "gs://bucket/path/subpath"}),
             result);
 }
 

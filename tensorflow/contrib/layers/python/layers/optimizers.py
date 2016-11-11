@@ -235,7 +235,7 @@ def optimize_loss(loss,
 
     if "gradient_norm" in summaries:
       summary.scalar("global_norm/gradient_norm",
-                     clip_ops.global_norm(zip(*gradients)[0]))
+                     clip_ops.global_norm(list(zip(*gradients))[0]))
 
     # Optionally clip gradients by global norm.
     if isinstance(clip_gradients, float):
@@ -258,15 +258,16 @@ def optimize_loss(loss,
         grad_values = gradient
 
       if grad_values is not None:
+        var_name = variable.name.replace(":", "_")
         if "gradients" in summaries:
-          summary.histogram("gradients/" + variable.name, grad_values)
+          summary.histogram("gradients/%s" % var_name, grad_values)
         if "gradient_norm" in summaries:
-          summary.scalar("gradient_norm/" + variable.name,
+          summary.scalar("gradient_norm/%s" % var_name,
                          clip_ops.global_norm([grad_values]))
 
     if clip_gradients is not None and "gradient_norm" in summaries:
       summary.scalar("global_norm/clipped_gradient_norm",
-                     clip_ops.global_norm(zip(*gradients)[0]))
+                     clip_ops.global_norm(list(zip(*gradients))[0]))
 
     # Create gradient updates.
     grad_updates = opt.apply_gradients(gradients,
@@ -297,7 +298,7 @@ def _adaptive_max_norm(norm, std_factor, decay, global_step, epsilon, name):
           name, shape=value.get_shape(), dtype=value.dtype,
           initializer=init_ops.zeros_initializer, trainable=False)
       return moving_averages.assign_moving_average(
-          moving_average_variable, value, decay)
+          moving_average_variable, value, decay, zero_debias=False)
 
     # quicker adaptation at the beginning
     if global_step is not None:

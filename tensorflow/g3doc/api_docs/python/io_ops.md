@@ -2724,6 +2724,26 @@ Reads and outputs the entire contents of the input filename.
   A `Tensor` of type `string`.
 
 
+- - -
+
+### `tf.write_file(filename, contents, name=None)` {#write_file}
+
+Writes contents to the file at input filename. Creates file if not existing.
+
+##### Args:
+
+
+*  <b>`filename`</b>: A `Tensor` of type `string`.
+    scalar. The name of the file to which we write the contents.
+*  <b>`contents`</b>: A `Tensor` of type `string`.
+    scalar. The content to be written to the output file.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  The created Operation.
+
+
 
 ## Input pipeline
 
@@ -2779,7 +2799,7 @@ Returns tensor `num_epochs` times and then raises an `OutOfRange` error.
 
 - - -
 
-### `tf.train.input_producer(input_tensor, element_shape=None, num_epochs=None, shuffle=True, seed=None, capacity=32, shared_name=None, summary_name=None, name=None)` {#input_producer}
+### `tf.train.input_producer(input_tensor, element_shape=None, num_epochs=None, shuffle=True, seed=None, capacity=32, shared_name=None, summary_name=None, name=None, cancel_op=None)` {#input_producer}
 
 Output the rows of `input_tensor` to a queue for an input pipeline.
 
@@ -2805,6 +2825,7 @@ Output the rows of `input_tensor` to a queue for an input pipeline.
 *  <b>`summary_name`</b>: (Optional.) If set, a scalar summary for the current queue
     size will be generated, using this name as part of the tag.
 *  <b>`name`</b>: (Optional.) A name for queue.
+*  <b>`cancel_op`</b>: (Optional.) Cancel op for the queue
 
 ##### Returns:
 
@@ -2886,7 +2907,7 @@ is added to the current `Graph`'s `QUEUE_RUNNER` collection.
 
 - - -
 
-### `tf.train.string_input_producer(string_tensor, num_epochs=None, shuffle=True, seed=None, capacity=32, shared_name=None, name=None)` {#string_input_producer}
+### `tf.train.string_input_producer(string_tensor, num_epochs=None, shuffle=True, seed=None, capacity=32, shared_name=None, name=None, cancel_op=None)` {#string_input_producer}
 
 Output strings (e.g. filenames) to a queue for an input pipeline.
 
@@ -2906,6 +2927,7 @@ Output strings (e.g. filenames) to a queue for an input pipeline.
 *  <b>`shared_name`</b>: (optional). If set, this queue will be shared under the given
     name across multiple sessions.
 *  <b>`name`</b>: A name for the operations (optional).
+*  <b>`cancel_op`</b>: Cancel op for the queue (optional).
 
 ##### Returns:
 

@@ -71,6 +71,7 @@ or join multiple tensors together.
 @@gather
 @@gather_nd
 @@unique_with_counts
+@@scatter_nd
 @@dynamic_partition
 @@dynamic_stitch
 @@boolean_mask
@@ -81,6 +82,15 @@ or join multiple tensors together.
 @@quantized_concat
 @@setdiff1d
 
+## Fake quantization
+Operations used to help train for better quantization accuracy.
+
+@@fake_quant_with_min_max_args
+@@fake_quant_with_min_max_args_gradient
+@@fake_quant_with_min_max_vars
+@@fake_quant_with_min_max_vars_gradient
+@@fake_quant_with_min_max_vars_per_channel
+@@fake_quant_with_min_max_vars_per_channel_gradient
 """
 from __future__ import absolute_import
 from __future__ import division
@@ -103,6 +113,7 @@ from tensorflow.python.ops import gen_math_ops
 # go/tf-wildcard-import
 # pylint: disable=wildcard-import
 from tensorflow.python.ops.gen_array_ops import *
+from tensorflow.python.util.deprecation import deprecated
 # pylint: enable=wildcard-import
 
 
@@ -115,25 +126,22 @@ _baseslice = slice
 
 
 # Aliases for some automatically-generated names.
-listdiff = gen_array_ops.list_diff
+# pylint: disable=protected-access
+@deprecated(
+    "2016-11-30",
+    "This op will be removed after the deprecation date. "
+    "Please switch to tf.setdiff1d().")
+def listdiff(x, y, out_idx=None, name=None):
+  return gen_array_ops._list_diff(x, y, out_idx, name)
+listdiff.__doc__ = gen_array_ops._list_diff.__doc__ + "\n" + listdiff.__doc__
+# pylint: enable=protected-access
 
 
+# pylint: disable=undefined-variable,protected-access
 def setdiff1d(x, y, index_dtype=dtypes.int32, name=None):
-  """Returns the difference between the `x` and `y` treated as sets.
-
-  Args:
-    x: Set of values not assumed to be unique.
-    y: Set of values not assumed to be unique.
-    index_dtype: Output index type (`tf.int32`, `tf.int64`) default: `tf.int32`
-    name: A name for the operation (optional).
-
-
-  Returns:
-    A `Tensor` the same type as `x` and `y`
-    A `Tensor` that is of type `index_dtype` representing indices from .
-  """
-
-  return gen_array_ops.list_diff(x, y, index_dtype, name)
+  return gen_array_ops._list_diff(x, y, index_dtype, name)
+setdiff1d.__doc__ = gen_array_ops._list_diff.__doc__
+# pylint: enable=protected-access
 
 
 def shape(input, name=None, out_type=dtypes.int32):
@@ -604,7 +612,7 @@ def _SliceHelperVar(var, slice_spec):
   import tensorflow as tf
   A = tf.Variable([[1,2,3], [4,5,6], [7,8,9]], dtype=tf.float32)
   with tf.Session() as sess:
-    sess.run(tf.initialize_all_variables())
+    sess.run(tf.global_variables_initializer())
     print sess.run(A[:2, :2]) # => [[1,2], [4,5]]
 
     op = A[:2,:2].assign(22. * tf.ones((2, 2)))
@@ -689,9 +697,7 @@ def stack(values, axis=0, name="stack"):
 
 
 def pack(values, axis=0, name="pack"):
-  """DEPRECATED: Use stack.
-
-  Packs a list of rank-`R` tensors into one rank-`(R+1)` tensor.
+  """Packs a list of rank-`R` tensors into one rank-`(R+1)` tensor.
 
   Packs the list of tensors in `values` into a tensor with rank one higher than
   each tensor in `values`, by packing them along the `axis` dimension.
@@ -1102,7 +1108,7 @@ def sparse_mask(a, mask_indices, name=None):
   """
   with ops.name_scope(name, "sparse_mask", [a, mask_indices]) as name:
     indices = a.indices
-    out_indices, to_gather = listdiff(indices, mask_indices)
+    out_indices, to_gather = setdiff1d(indices, mask_indices)
     out_values = gather(a.values, to_gather, name=name)
     return ops.IndexedSlices(out_values, out_indices, a.dense_shape)
 
@@ -1917,12 +1923,14 @@ def _TileShape(op):
   # us to handle partially-known multiples.
   multiples = tensor_util.constant_value_as_shape(op.inputs[1]).with_rank(
       input_shape.ndims)
+
   if multiples.ndims is None:
     return [tensor_shape.unknown_shape()]
   else:
+    input_dims = input_shape.dims or [None for _ in multiples.dims]
     output_dims = []
-    for dim, multiple in zip(input_shape.dims, multiples.dims):
-      output_dims.append(dim * multiple)
+    for dim, multiple in zip(input_dims, multiples.dims):
+      output_dims.append(multiple * dim)
     return [tensor_shape.TensorShape(output_dims)]
 
 
@@ -2043,8 +2051,14 @@ def _FakeQuantWithMinMaxArgsGradient(op, grad):
 
 
 ops.RegisterShape("FakeQuantWithMinMaxArgs")(common_shapes.call_cpp_shape_fn)
+ops.RegisterShape("FakeQuantWithMinMaxArgsGradient")(
+    common_shapes.call_cpp_shape_fn)
 ops.RegisterShape("FakeQuantWithMinMaxVars")(common_shapes.call_cpp_shape_fn)
+ops.RegisterShape("FakeQuantWithMinMaxVarsGradient")(
+    common_shapes.call_cpp_shape_fn)
 ops.RegisterShape("FakeQuantWithMinMaxVarsPerChannel")(
+    common_shapes.call_cpp_shape_fn)
+ops.RegisterShape("FakeQuantWithMinMaxVarsPerChannelGradient")(
     common_shapes.call_cpp_shape_fn)
 
 
@@ -2537,3 +2551,49 @@ def _QuantizedReshapeShape(op):
 ops.RegisterShape("QuantizeV2")(None)
 ops.RegisterShape("QuantizedBatchNormWithGlobalNormalization")(None)
 ops.RegisterShape("QuantizedConcat")(None)
+
+
+@ops.RegisterShape("ScatterNd")
+def _ScatterNdShape(op):
+  """Shape function for the ScatterNd op.
+
+  The shape of the ouput is defined as a parameter on the Operation.
+
+  Args:
+    op: A ScatterNd Operation.
+
+  Returns:
+    A single-element list containing the shape of the output.
+
+  Raises:
+    ValueError: if the arguments have invalid rank
+  """
+  indices_shape = op.inputs[0].get_shape()
+  updates_shape = op.inputs[1].get_shape()
+  output_shape = tensor_util.constant_value_as_shape(op.inputs[2])
+
+  if output_shape.num_elements() == 0 and not (
+      indices_shape.num_elements() in
+      (None, 0) and updates_shape.num_elements() in (None, 0)):
+    raise ValueError("Indices and updates specified for empty output shape")
+
+  if indices_shape.ndims is not None and output_shape is not None:
+    outer_dims = len(indices_shape) - 1
+    ixdim = indices_shape[-1].value or 0
+
+    if not indices_shape[:outer_dims].is_compatible_with(
+        updates_shape[:outer_dims]):
+      raise ValueError("The outer %d dimensions of indices.shape=%s must "
+                       "match the outer %d dimensions of updates.shape=%s" % (
+                           outer_dims, indices_shape, outer_dims,
+                           updates_shape))
+    if output_shape.ndims is not None:
+      if not output_shape[ixdim:].is_compatible_with(updates_shape[
+          outer_dims:]):
+        raise ValueError("The inner %d dimensions of output.shape=%s must "
+                         "match the inner %d dimensions of updates.shape=%s" % (
+                             len(output_shape)-ixdim, output_shape,
+                             len(updates_shape)-outer_dims, updates_shape))
+
+    return [output_shape]
+  return [None]

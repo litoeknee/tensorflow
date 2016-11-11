@@ -81,7 +81,7 @@ Status ParseGcsPath(StringPiece fname, bool empty_object_ok, string* bucket,
     return errors::Internal("bucket and object cannot be null.");
   }
   StringPiece scheme, bucketp, objectp;
-  ParseURI(fname, &scheme, &bucketp, &objectp);
+  io::ParseURI(fname, &scheme, &bucketp, &objectp);
   if (scheme != "gs") {
     return errors::InvalidArgument("GCS path doesn't start with 'gs://': ",
                                    fname);
@@ -116,6 +116,26 @@ string MaybeAppendSlash(const string& name) {
 // to be processed correctly: "gs://a/b" + "" should give "gs://a/b/".
 string JoinGcsPath(const string& path, const string& subpath) {
   return strings::StrCat(MaybeAppendSlash(path), subpath);
+}
+
+/// \brief Returns the given paths appending all their subfolders.
+///
+/// For every path X in the list, every subfolder in X is added to the
+/// resulting list.
+/// For example:
+///  - for 'a/b/c/d' it will append 'a', 'a/b' and 'a/b/c'
+///  - for 'a/b/c/' it will append 'a', 'a/b' and 'a/b/c'
+std::set<string> AddAllSubpaths(const std::vector<string>& paths) {
+  std::set<string> result;
+  result.insert(paths.begin(), paths.end());
+  for (const string& path : paths) {
+    StringPiece subpath = io::Dirname(path);
+    while (!subpath.empty()) {
+      result.emplace(subpath.ToString());
+      subpath = io::Dirname(subpath);
+    }
+  }
+  return result;
 }
 
 Status ParseJson(StringPiece json, Json::Value* result) {
@@ -203,7 +223,7 @@ class GcsRandomAccessFile : public RandomAccessFile {
     const bool range_start_included = offset >= buffer_start_offset_;
     const bool range_end_included =
         offset + n <= buffer_start_offset_ + buffer_content_size_;
-    if (range_start_included && (range_end_included || buffer_reached_eof_)) {
+    if (range_start_included && range_end_included) {
       // The requested range can be filled from the buffer.
       const size_t offset_in_buffer =
           std::min<uint64>(offset - buffer_start_offset_, buffer_content_size_);
@@ -226,7 +246,6 @@ class GcsRandomAccessFile : public RandomAccessFile {
       TF_RETURN_IF_ERROR(
           ReadFromGCS(offset, buffer_size_, &buffer_content, buffer_.get()));
       buffer_content_size_ = buffer_content.size();
-      buffer_reached_eof_ = buffer_content_size_ < buffer_size_;
 
       // Set the results.
       *result = StringPiece(scratch, std::min(buffer_content_size_, n));
@@ -277,7 +296,6 @@ class GcsRandomAccessFile : public RandomAccessFile {
   // The original file offset of the first byte in the buffer.
   mutable size_t buffer_start_offset_ GUARDED_BY(mu_) = 0;
   mutable size_t buffer_content_size_ GUARDED_BY(mu_) = 0;
-  mutable bool buffer_reached_eof_ GUARDED_BY(mu_) = false;
 };
 
 /// \brief GCS-based implementation of a writeable file.
@@ -649,19 +667,26 @@ Status GcsFileSystem::NewReadOnlyMemoryRegionFromFile(
   return Status::OK();
 }
 
-bool GcsFileSystem::FileExists(const string& fname) {
+Status GcsFileSystem::FileExists(const string& fname) {
   string bucket, object;
-  if (!ParseGcsPath(fname, true, &bucket, &object).ok()) {
-    LOG(ERROR) << "Could not parse GCS file name " << fname;
-    return false;
-  }
+  TF_RETURN_IF_ERROR(ParseGcsPath(fname, true, &bucket, &object));
   if (object.empty()) {
     bool result;
-    return BucketExists(bucket, &result).ok() && result;
+    TF_RETURN_IF_ERROR(BucketExists(bucket, &result));
+    if (result) {
+      return Status::OK();
+    }
   }
   bool result;
-  return (ObjectExists(bucket, object, &result).ok() && result) ||
-         (FolderExists(fname, &result).ok() && result);
+  TF_RETURN_IF_ERROR(ObjectExists(bucket, object, &result));
+  if (result) {
+    return Status::OK();
+  }
+  TF_RETURN_IF_ERROR(FolderExists(fname, &result));
+  if (result) {
+    return Status::OK();
+  }
+  return errors::NotFound("The specified path ", fname, " was not found.");
 }
 
 Status GcsFileSystem::ObjectExists(const string& bucket, const string& object,
@@ -784,9 +809,11 @@ Status GcsFileSystem::GetMatchingPaths(const string& pattern,
       GetChildrenBounded(dir, UINT64_MAX, &all_files, true /* recursively */,
                          false /* include_self_directory_marker */));
 
-  // Match all obtained files to the input pattern.
-  for (const auto& f : all_files) {
-    const string& full_path = io::JoinPath(dir, f);
+  const auto& files_and_folders = AddAllSubpaths(all_files);
+
+  // Match all obtained paths to the input pattern.
+  for (const auto& path : files_and_folders) {
+    const string& full_path = io::JoinPath(dir, path);
     if (Env::Default()->MatchPath(full_path, pattern)) {
       results->push_back(full_path);
     }

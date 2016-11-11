@@ -25,6 +25,7 @@ from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import sparse_tensor
+from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import data_flow_ops
 from tensorflow.python.ops import io_ops
 from tensorflow.python.ops import math_ops
@@ -84,7 +85,7 @@ def read_batch_examples(file_pattern, batch_size, reader,
     num_epochs: Integer specifying the number of times to read through the
       dataset. If `None`, cycles through the dataset forever.
       NOTE - If specified, creates a variable that must be initialized, so call
-      `tf.initialize_all_variables()` as shown in the tests.
+      `tf.global_variables_initializer()` as shown in the tests.
     queue_capacity: Capacity for input queue.
     num_threads: The number of threads enqueuing examples.
     read_batch_size: An int or scalar `Tensor` specifying the number of
@@ -136,7 +137,7 @@ def read_keyed_batch_examples(
     num_epochs: Integer specifying the number of times to read through the
       dataset. If `None`, cycles through the dataset forever.
       NOTE - If specified, creates a variable that must be initialized, so call
-      `tf.initialize_all_variables()` as shown in the tests.
+      `tf.global_variables_initializer()` as shown in the tests.
     queue_capacity: Capacity for input queue.
     num_threads: The number of threads enqueuing examples.
     read_batch_size: An int or scalar `Tensor` specifying the number of
@@ -205,7 +206,7 @@ def _read_keyed_batch_examples_shared_queue(file_pattern,
     num_epochs: Integer specifying the number of times to read through the
       dataset. If `None`, cycles through the dataset forever.
       NOTE - If specified, creates a variable that must be initialized, so call
-      `tf.initialize_all_variables()` as shown in the tests.
+      `tf.global_variables_initializer()` as shown in the tests.
     queue_capacity: Capacity for input queue.
     num_threads: The number of threads enqueuing examples.
     read_batch_size: An int or scalar `Tensor` specifying the number of
@@ -248,7 +249,8 @@ def _get_shared_file_name_queue(file_names, shuffle, num_epochs, name):
         shuffle=shuffle,
         num_epochs=num_epochs,
         name=name,
-        shared_name=name)
+        shared_name=name,
+        cancel_op=control_flow_ops.no_op())
     return shared_file_name_queue
 
 
@@ -328,7 +330,7 @@ def _read_keyed_batch_examples_helper(file_pattern,
     num_epochs: Integer specifying the number of times to read through the
       dataset. If `None`, cycles through the dataset forever.
       NOTE - If specified, creates a variable that must be initialized, so call
-      `tf.initialize_all_variables()` as shown in the tests.
+      `tf.global_variables_initializer()` as shown in the tests.
     queue_capacity: Capacity for input queue.
     num_threads: The number of threads enqueuing examples.
     read_batch_size: An int or scalar `Tensor` specifying the number of
@@ -454,7 +456,7 @@ def read_keyed_batch_features(file_pattern,
     num_epochs: Integer specifying the number of times to read through the
       dataset. If None, cycles through the dataset forever. NOTE - If specified,
       creates a variable that must be initialized, so call
-      tf.initialize_local_variables() as shown in the tests.
+      tf.local_variables_initializer() as shown in the tests.
     queue_capacity: Capacity for input queue.
     reader_num_threads: The number of threads to read examples.
     feature_queue_capacity: Capacity of the parsed features queue.
@@ -539,7 +541,7 @@ def _read_keyed_batch_features_shared_queue(file_pattern,
     num_epochs: Integer specifying the number of times to read through the
       dataset. If None, cycles through the dataset forever. NOTE - If specified,
       creates a variable that must be initialized, so call
-      tf.initialize_local_variables() as shown in the tests.
+      tf.local_variables_initializer() as shown in the tests.
     queue_capacity: Capacity for input queue.
     reader_num_threads: The number of threads to read examples.
     feature_queue_capacity: Capacity of the parsed features queue.
@@ -755,7 +757,7 @@ def read_batch_features(file_pattern,
     num_epochs: Integer specifying the number of times to read through the
       dataset. If None, cycles through the dataset forever. NOTE - If specified,
       creates a variable that must be initialized, so call
-      tf.initialize_local_variables() as shown in the tests.
+      tf.local_variables_initializer() as shown in the tests.
     queue_capacity: Capacity for input queue.
     feature_queue_capacity: Capacity of the parsed features queue. Set this
       value to a small number, for example 5 if the parsed features are large.
@@ -798,7 +800,7 @@ def read_batch_record_features(file_pattern, batch_size, features,
     num_epochs: Integer specifying the number of times to read through the
       dataset. If None, cycles through the dataset forever. NOTE - If specified,
       creates a variable that must be initialized, so call
-      tf.initialize_local_variables() as shown in the tests.
+      tf.local_variables_initializer() as shown in the tests.
     queue_capacity: Capacity for input queue.
     reader_num_threads: The number of threads to read examples.
     name: Name of resulting op.

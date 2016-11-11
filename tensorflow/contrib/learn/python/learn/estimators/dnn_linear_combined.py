@@ -35,6 +35,7 @@ from tensorflow.contrib.learn.python.learn import trainable
 from tensorflow.contrib.learn.python.learn.estimators import composable_model
 from tensorflow.contrib.learn.python.learn.estimators import estimator
 from tensorflow.contrib.learn.python.learn.estimators import head as head_lib
+from tensorflow.contrib.learn.python.learn.estimators import prediction_key
 from tensorflow.contrib.learn.python.learn.utils import export
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import control_flow_ops
@@ -552,27 +553,25 @@ class DNNLinearCombinedClassifier(evaluable.Evaluable, trainable.Trainable):
   Example:
 
   ```python
-  education = sparse_column_with_hash_bucket(column_name="education",
-                                             hash_bucket_size=1000)
-  occupation = sparse_column_with_hash_bucket(column_name="occupation",
-                                              hash_bucket_size=1000)
+  sparse_feature_a = sparse_column_with_hash_bucket(...)
+  sparse_feature_b = sparse_column_with_hash_bucket(...)
 
-  education_x_occupation = crossed_column(columns=[education, occupation],
-                                          hash_bucket_size=10000)
-  education_emb = embedding_column(sparse_id_column=education, dimension=16,
-                                   combiner="sum")
-  occupation_emb = embedding_column(sparse_id_column=occupation, dimension=16,
-                                   combiner="sum")
+  sparse_feature_a_x_sparse_feature_b = crossed_column(...)
+
+  sparse_feature_a_emb = embedding_column(sparse_id_column=sparse_feature_a,
+                                          ...)
+  sparse_feature_b_emb = embedding_column(sparse_id_column=sparse_feature_b,
+                                          ...)
 
   estimator = DNNLinearCombinedClassifier(
       # common settings
       n_classes=n_classes,
       weight_column_name=weight_column_name,
       # wide settings
-      linear_feature_columns=[education_x_occupation],
+      linear_feature_columns=[sparse_feature_a_x_sparse_feature_b],
       linear_optimizer=tf.train.FtrlOptimizer(...),
       # deep settings
-      dnn_feature_columns=[education_emb, occupation_emb],
+      dnn_feature_columns=[sparse_feature_a_emb, sparse_feature_b_emb],
       dnn_hidden_units=[1000, 500, 100],
       dnn_optimizer=tf.train.AdagradOptimizer(...))
 
@@ -747,13 +746,16 @@ class DNNLinearCombinedClassifier(evaluable.Evaluable, trainable.Trainable):
       Numpy array of predicted classes (or an iterable of predicted classes if
       as_iterable is True).
     """
-    preds = self._estimator.predict(x=x, input_fn=input_fn,
-                                    batch_size=batch_size,
-                                    outputs=[head_lib.PredictionKey.CLASSES],
-                                    as_iterable=as_iterable)
+    key = prediction_key.PredictionKey.CLASSES
+    preds = self._estimator.predict(
+        x=x,
+        input_fn=input_fn,
+        batch_size=batch_size,
+        outputs=[key],
+        as_iterable=as_iterable)
     if as_iterable:
-      return _as_iterable(preds, output=head_lib.PredictionKey.CLASSES)
-    return preds[head_lib.PredictionKey.CLASSES].reshape(-1)
+      return _as_iterable(preds, output=key)
+    return preds[key].reshape(-1)
 
   @deprecated_arg_values(
       estimator.AS_ITERABLE_DATE, estimator.AS_ITERABLE_INSTRUCTIONS,
@@ -775,20 +777,22 @@ class DNNLinearCombinedClassifier(evaluable.Evaluable, trainable.Trainable):
       Numpy array of predicted probabilities (or an iterable of predicted
       probabilities if as_iterable is True).
     """
+    key = prediction_key.PredictionKey.PROBABILITIES
     preds = self._estimator.predict(
-        x=x, input_fn=input_fn,
+        x=x,
+        input_fn=input_fn,
         batch_size=batch_size,
-        outputs=[head_lib.PredictionKey.PROBABILITIES],
+        outputs=[key],
         as_iterable=as_iterable)
     if as_iterable:
-      return _as_iterable(preds, output=head_lib.PredictionKey.PROBABILITIES)
-    return preds[head_lib.PredictionKey.PROBABILITIES]
+      return _as_iterable(preds, output=key)
+    return preds[key]
 
   def _get_predict_ops(self, features):
     """See `Estimator` class."""
     # pylint: disable=protected-access
     return self._estimator._get_predict_ops(features)[
-        head_lib.PredictionKey.PROBABILITIES]
+        prediction_key.PredictionKey.PROBABILITIES]
 
   def get_variable_names(self):
     """Returns list of all variable names in this model.
@@ -826,9 +830,9 @@ class DNNLinearCombinedClassifier(evaluable.Evaluable, trainable.Trainable):
         input_fn=input_fn or default_input_fn,
         input_feature_key=input_feature_key,
         use_deprecated_input_fn=use_deprecated_input_fn,
-        signature_fn=(
-            signature_fn or export.classification_signature_fn_with_prob),
-        prediction_key=head_lib.PredictionKey.PROBABILITIES,
+        signature_fn=(signature_fn or
+                      export.classification_signature_fn_with_prob),
+        prediction_key=prediction_key.PredictionKey.PROBABILITIES,
         default_batch_size=default_batch_size,
         exports_to_keep=exports_to_keep)
 
@@ -908,26 +912,24 @@ class DNNLinearCombinedRegressor(_DNNLinearCombinedBaseEstimator):
   Example:
 
   ```python
-  education = sparse_column_with_hash_bucket(column_name="education",
-                                             hash_bucket_size=1000)
-  occupation = sparse_column_with_hash_bucket(column_name="occupation",
-                                              hash_bucket_size=1000)
+  sparse_feature_a = sparse_column_with_hash_bucket(...)
+  sparse_feature_b = sparse_column_with_hash_bucket(...)
 
-  education_x_occupation = crossed_column(columns=[education, occupation],
-                                          hash_bucket_size=10000)
-  education_emb = embedding_column(sparse_id_column=education, dimension=16,
-                                   combiner="sum")
-  occupation_emb = embedding_column(sparse_id_column=occupation, dimension=16,
-                                   combiner="sum")
+  sparse_feature_a_x_sparse_feature_b = crossed_column(...)
+
+  sparse_feature_a_emb = embedding_column(sparse_id_column=sparse_feature_a,
+                                          ...)
+  sparse_feature_b_emb = embedding_column(sparse_id_column=sparse_feature_b,
+                                          ...)
 
   estimator = DNNLinearCombinedRegressor(
       # common settings
       weight_column_name=weight_column_name,
       # wide settings
-      linear_feature_columns=[education_x_occupation],
+      linear_feature_columns=[sparse_feature_a_x_sparse_feature_b],
       linear_optimizer=tf.train.FtrlOptimizer(...),
       # deep settings
-      dnn_feature_columns=[education_emb, occupation_emb],
+      dnn_feature_columns=[sparse_feature_a_emb, sparse_feature_b_emb],
       dnn_hidden_units=[1000, 500, 100],
       dnn_optimizer=tf.train.ProximalAdagradOptimizer(...))
 
@@ -1041,10 +1043,11 @@ class DNNLinearCombinedRegressor(_DNNLinearCombinedBaseEstimator):
         head=head,
         config=config,
         feature_engineering_fn=feature_engineering_fn,
-        default_prediction_key=head_lib.PredictionKey.SCORES,
+        default_prediction_key=prediction_key.PredictionKey.SCORES,
         enable_centered_bias=enable_centered_bias)
 
   def _get_predict_ops(self, features):
     """See base class."""
-    return super(DNNLinearCombinedRegressor, self)._get_predict_ops(features)[
-        head_lib.PredictionKey.SCORES]
+    return super(
+        DNNLinearCombinedRegressor,
+        self)._get_predict_ops(features)[prediction_key.PredictionKey.SCORES]

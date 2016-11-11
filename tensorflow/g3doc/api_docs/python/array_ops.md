@@ -951,8 +951,6 @@ This is the opposite of unstack.  The numpy equivalent is
 
 ### `tf.pack(values, axis=0, name='pack')` {#pack}
 
-DEPRECATED: Use stack.
-
 Packs a list of rank-`R` tensors into one rank-`(R+1)` tensor.
 
 Packs the list of tensors in `values` into a tensor with rank one higher than
@@ -2242,6 +2240,103 @@ count ==> [2, 1, 3, 1, 2]
 
 - - -
 
+### `tf.scatter_nd(indices, updates, shape, name=None)` {#scatter_nd}
+
+Creates a new tensor by applying sparse `updates` to individual
+
+values or slices within a zero tensor of the given `shape` tensor according to
+indices.  This operator is the inverse of the [tf.gather_nd](#gather_nd)
+operator which extracts values or slices from a given tensor.
+
+TODO(simister): Add a link to Variable.__getitem__ documentation on slice
+syntax.
+
+`shape` is a `TensorShape` with rank `P` and `indices` is a `Tensor` of rank
+`Q`.
+
+`indices` must be integer tensor, containing indices into `shape`.
+It must be shape `[d_0, ..., d_{Q-2}, K]` where `0 < K <= P`.
+
+The innermost dimension of `indices` (with length `K`) corresponds to
+indices into elements (if `K = P`) or slices (if `K < P`) along the `K`th
+dimension of `shape`.
+
+`updates` is Tensor of rank `Q-1+P-K` with shape:
+
+```
+[d_0, ..., d_{Q-2}, shape[K], ..., shape[P-1]].
+```
+
+The simplest form of scatter is to insert individual elements in a tensor by
+index. For example, say we want to insert 4 scattered elements in a rank-1
+tensor with 8 elements.
+
+<div style="width:70%; margin:auto; margin-bottom:10px; margin-top:20px;">
+<img style="width:100%" src="../../images/ScatterNd1.png" alt>
+</div>
+
+In Python, this scatter operation would look like this:
+
+    indices = tf.constant([[4], [3], [1], [7]])
+    updates = tf.constant([9, 10, 11, 12])
+    shape = tf.constant([8])
+    scatter = tf.scatter_nd(indices, updates, shape)
+    with tf.Session() as sess:
+      print sess.run(scatter)
+
+The resulting tensor would look like this:
+
+    [0, 11, 0, 10, 9, 0, 0, 12]
+
+We can also, insert entire slices of a higher rank tensor all at once. For
+example, if we wanted to insert two slices in the first dimension of a
+rank-3 tensor with two matrices of new values.
+
+<div style="width:70%; margin:auto; margin-bottom:10px; margin-top:20px;">
+<img style="width:100%" src="../../images/ScatterNd2.png" alt>
+</div>
+
+In Python, this scatter operation would look like this:
+
+    indices = tf.constant([[0], [2]])
+    updates = tf.constant([[[5, 5, 5, 5], [6, 6, 6, 6],
+                            [7, 7, 7, 7], [8, 8, 8, 8]],
+                           [[5, 5, 5, 5], [6, 6, 6, 6],
+                            [7, 7, 7, 7], [8, 8, 8, 8]]])
+    shape = tf.constant([4, 4, 4])
+    scatter = tf.scatter_nd(indices, updates, shape)
+    with tf.Session() as sess:
+      print sess.run(scatter)
+
+The resulting tensor would look like this:
+
+    [[[5, 5, 5, 5], [6, 6, 6, 6], [7, 7, 7, 7], [8, 8, 8, 8]],
+     [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+     [[5, 5, 5, 5], [6, 6, 6, 6], [7, 7, 7, 7], [8, 8, 8, 8]],
+     [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]]
+
+##### Args:
+
+
+*  <b>`indices`</b>: A `Tensor`. Must be one of the following types: `int32`, `int64`.
+    A Tensor. Must be one of the following types: int32, int64.
+    A tensor of indices into ref.
+*  <b>`updates`</b>: A `Tensor`.
+    A Tensor. Must have the same type as tensor. A tensor of updated values
+    to store in ref.
+*  <b>`shape`</b>: A `Tensor`. Must have the same type as `indices`.
+    A vector. The shape of the resulting tensor.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  A `Tensor`. Has the same type as `updates`.
+  A new tensor with the given shape and updates applied according
+  to the indices.
+
+
+- - -
+
 ### `tf.dynamic_partition(data, partitions, num_partitions, name=None)` {#dynamic_partition}
 
 Partitions `data` into `num_partitions` tensors using indices from `partitions`.
@@ -2741,20 +2836,263 @@ Concatenates quantized tensors along one dimension.
 
 ### `tf.setdiff1d(x, y, index_dtype=tf.int32, name=None)` {#setdiff1d}
 
-Returns the difference between the `x` and `y` treated as sets.
+Computes the difference between two lists of numbers or strings.
+
+Given a list `x` and a list `y`, this operation returns a list `out` that
+represents all values that are in `x` but not in `y`. The returned list `out`
+is sorted in the same order that the numbers appear in `x` (duplicates are
+preserved). This operation also returns a list `idx` that represents the
+position of each `out` element in `x`. In other words:
+
+`out[i] = x[idx[i]] for i in [0, 1, ..., len(out) - 1]`
+
+For example, given this input:
+
+```prettyprint
+x = [1, 2, 3, 4, 5, 6]
+y = [1, 3, 5]
+```
+
+This operation would return:
+
+```prettyprint
+out ==> [2, 4, 6]
+idx ==> [1, 3, 5]
+```
 
 ##### Args:
 
 
-*  <b>`x`</b>: Set of values not assumed to be unique.
-*  <b>`y`</b>: Set of values not assumed to be unique.
-*  <b>`index_dtype`</b>: Output index type (`tf.int32`, `tf.int64`) default: `tf.int32`
+*  <b>`x`</b>: A `Tensor`. 1-D. Values to keep.
+*  <b>`y`</b>: A `Tensor`. Must have the same type as `x`. 1-D. Values to remove.
+*  <b>`out_idx`</b>: An optional `tf.DType` from: `tf.int32, tf.int64`. Defaults to `tf.int32`.
 *  <b>`name`</b>: A name for the operation (optional).
-
 
 ##### Returns:
 
-  A `Tensor` the same type as `x` and `y`
-  A `Tensor` that is of type `index_dtype` representing indices from .
+  A tuple of `Tensor` objects (out, idx).
+
+*  <b>`out`</b>: A `Tensor`. Has the same type as `x`. 1-D. Values present in `x` but not in `y`.
+*  <b>`idx`</b>: A `Tensor` of type `out_idx`. 1-D. Positions of `x` values preserved in `out`.
+
+
+
+## Fake quantization
+Operations used to help train for better quantization accuracy.
+
+- - -
+
+### `tf.fake_quant_with_min_max_args(inputs, min=None, max=None, name=None)` {#fake_quant_with_min_max_args}
+
+Fake-quantize the 'inputs' tensor, type float to 'outputs' tensor of same type.
+
+Attributes [min; max] define the clamping range for the 'inputs' data.  Op
+divides this range into 255 steps (total of 256 values), then replaces each
+'inputs' value with the closest of the quantized step values.
+
+Quantization is called fake since the output is still in floating point.
+
+##### Args:
+
+
+*  <b>`inputs`</b>: A `Tensor` of type `float32`.
+*  <b>`min`</b>: An optional `float`. Defaults to `-6`.
+*  <b>`max`</b>: An optional `float`. Defaults to `6`.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  A `Tensor` of type `float32`.
+
+
+- - -
+
+### `tf.fake_quant_with_min_max_args_gradient(gradients, inputs, min=None, max=None, name=None)` {#fake_quant_with_min_max_args_gradient}
+
+Compute gradients for a FakeQuantWithMinMaxArgs operation.
+
+##### Args:
+
+
+*  <b>`gradients`</b>: A `Tensor` of type `float32`.
+    Backpropagated gradients above the FakeQuantWithMinMaxArgs operation.
+*  <b>`inputs`</b>: A `Tensor` of type `float32`.
+    Values passed as inputs to the FakeQuantWithMinMaxArgs operation.
+*  <b>`min`</b>: An optional `float`. Defaults to `-6`.
+*  <b>`max`</b>: An optional `float`. Defaults to `6`.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  A `Tensor` of type `float32`.
+  Backpropagated gradients below the FakeQuantWithMinMaxArgs operation:
+  `gradients * (inputs >= min && inputs <= max)`.
+
+
+- - -
+
+### `tf.fake_quant_with_min_max_vars(inputs, min, max, name=None)` {#fake_quant_with_min_max_vars}
+
+Fake-quantize the 'inputs' tensor of type float and shape `[b, h, w, d]` via
+
+global float scalars `min` and `max` to 'outputs' tensor of same shape as
+`inputs`.
+
+[min; max] is the clamping range for the 'inputs' data.  Op divides this range
+into 255 steps (total of 256 values), then replaces each 'inputs' value with the
+closest of the quantized step values.
+
+This operation has a gradient and thus allows for training `min` and `max` values.
+
+##### Args:
+
+
+*  <b>`inputs`</b>: A `Tensor` of type `float32`.
+*  <b>`min`</b>: A `Tensor` of type `float32`.
+*  <b>`max`</b>: A `Tensor` of type `float32`.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  A `Tensor` of type `float32`.
+
+
+- - -
+
+### `tf.fake_quant_with_min_max_vars_gradient(gradients, inputs, min, max, name=None)` {#fake_quant_with_min_max_vars_gradient}
+
+Compute gradients for a FakeQuantWithMinMaxVars operation.
+
+##### Args:
+
+
+*  <b>`gradients`</b>: A `Tensor` of type `float32`.
+    Backpropagated gradients above the FakeQuantWithMinMaxVars operation.
+*  <b>`inputs`</b>: A `Tensor` of type `float32`.
+    Values passed as inputs to the FakeQuantWithMinMaxVars operation.
+    min, max: Quantization interval, scalar floats.
+*  <b>`min`</b>: A `Tensor` of type `float32`.
+*  <b>`max`</b>: A `Tensor` of type `float32`.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  A tuple of `Tensor` objects (backprops_wrt_input, backprop_wrt_min, backprop_wrt_max).
+
+*  <b>`backprops_wrt_input`</b>: A `Tensor` of type `float32`. Backpropagated gradients w.r.t. inputs:
+    `gradients * (inputs >= min && inputs <= max)`.
+*  <b>`backprop_wrt_min`</b>: A `Tensor` of type `float32`. Backpropagated gradients w.r.t. min parameter:
+    `sum(gradients * (inputs < min))`.
+*  <b>`backprop_wrt_max`</b>: A `Tensor` of type `float32`. Backpropagated gradients w.r.t. max parameter:
+    `sum(gradients * (inputs > max))`.
+
+
+- - -
+
+### `tf.fake_quant_with_min_max_vars_per_channel(inputs, min, max, name=None)` {#fake_quant_with_min_max_vars_per_channel}
+
+Fake-quantize the 'inputs' tensor of type float and one of the shapes: `[d]`,
+
+`[b, d]` `[b, h, w, d]` via per-channel floats `min` and `max` of shape `[d]`
+to 'outputs' tensor of same shape as `inputs`.
+
+[min; max] is the clamping range for the 'inputs' data in the corresponding
+depth channel.  Op divides this range into 255 steps (total of 256 values), then
+replaces each 'inputs' value with the closest of the quantized step values.
+
+This operation has a gradient and thus allows for training `min` and `max` values.
+
+##### Args:
+
+
+*  <b>`inputs`</b>: A `Tensor` of type `float32`.
+*  <b>`min`</b>: A `Tensor` of type `float32`.
+*  <b>`max`</b>: A `Tensor` of type `float32`.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  A `Tensor` of type `float32`.
+
+
+- - -
+
+### `tf.fake_quant_with_min_max_vars_per_channel_gradient(gradients, inputs, min, max, name=None)` {#fake_quant_with_min_max_vars_per_channel_gradient}
+
+Compute gradients for a FakeQuantWithMinMaxVarsPerChannel operation.
+
+##### Args:
+
+
+*  <b>`gradients`</b>: A `Tensor` of type `float32`.
+    Backpropagated gradients above the FakeQuantWithMinMaxVars operation,
+    shape one of: `[d]`, `[b, d]`,  `[b, h, w, d]`.
+*  <b>`inputs`</b>: A `Tensor` of type `float32`.
+    Values passed as inputs to the FakeQuantWithMinMaxVars operation, shape
+      same as `gradients`.
+    min, max: Quantization interval, floats of shape `[d]`.
+*  <b>`min`</b>: A `Tensor` of type `float32`.
+*  <b>`max`</b>: A `Tensor` of type `float32`.
+*  <b>`name`</b>: A name for the operation (optional).
+
+##### Returns:
+
+  A tuple of `Tensor` objects (backprops_wrt_input, backprop_wrt_min, backprop_wrt_max).
+
+*  <b>`backprops_wrt_input`</b>: A `Tensor` of type `float32`. Backpropagated gradients w.r.t. inputs, shape same as
+    `inputs`:
+      `gradients * (inputs >= min && inputs <= max)`.
+*  <b>`backprop_wrt_min`</b>: A `Tensor` of type `float32`. Backpropagated gradients w.r.t. min parameter, shape `[d]`:
+    `sum_per_d(gradients * (inputs < min))`.
+*  <b>`backprop_wrt_max`</b>: A `Tensor` of type `float32`. Backpropagated gradients w.r.t. max parameter, shape `[d]`:
+    `sum_per_d(gradients * (inputs > max))`.
+
+
+
+## Other Functions and Classes
+- - -
+
+### `tf.listdiff(*args, **kwargs)` {#listdiff}
+
+Computes the difference between two lists of numbers or strings.
+
+  Given a list `x` and a list `y`, this operation returns a list `out` that
+  represents all values that are in `x` but not in `y`. The returned list `out`
+  is sorted in the same order that the numbers appear in `x` (duplicates are
+  preserved). This operation also returns a list `idx` that represents the
+  position of each `out` element in `x`. In other words:
+
+  `out[i] = x[idx[i]] for i in [0, 1, ..., len(out) - 1]`
+
+  For example, given this input:
+
+  ```prettyprint
+  x = [1, 2, 3, 4, 5, 6]
+  y = [1, 3, 5]
+  ```
+
+  This operation would return:
+
+  ```prettyprint
+  out ==> [2, 4, 6]
+  idx ==> [1, 3, 5]
+  ```
+
+  Args:
+    x: A `Tensor`. 1-D. Values to keep.
+    y: A `Tensor`. Must have the same type as `x`. 1-D. Values to remove.
+    out_idx: An optional `tf.DType` from: `tf.int32, tf.int64`. Defaults to `tf.int32`.
+    name: A name for the operation (optional).
+
+  Returns:
+    A tuple of `Tensor` objects (out, idx).
+    out: A `Tensor`. Has the same type as `x`. 1-D. Values present in `x` but not in `y`.
+    idx: A `Tensor` of type `out_idx`. 1-D. Positions of `x` values preserved in `out`.
+
+DEPRECATED FUNCTION
+
+THIS FUNCTION IS DEPRECATED. It will be removed after 2016-11-30.
+Instructions for updating:
+This op will be removed after the deprecation date. Please switch to tf.setdiff1d().
 
 

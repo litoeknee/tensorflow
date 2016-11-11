@@ -42,6 +42,15 @@ py_library(
 )
 
 py_library(
+    name = "stepper",
+    srcs = ["stepper.py"],
+    srcs_version = "PY2AND3",
+    deps = [
+        ":debug_data",
+    ],
+)
+
+py_library(
     name = "framework",
     srcs = ["wrappers/framework.py"],
     srcs_version = "PY2AND3",
@@ -115,6 +124,13 @@ py_binary(
 )
 
 py_binary(
+    name = "debug_errors",
+    srcs = ["examples/debug_errors.py"],
+    srcs_version = "PY2AND3",
+    deps = ["//tensorflow:tensorflow_py"],
+)
+
+py_binary(
     name = "debug_mnist",
     srcs = ["examples/debug_mnist.py"],
     srcs_version = "PY2AND3",
@@ -152,6 +168,20 @@ py_test(
         "//tensorflow/python:math_ops",
         "//tensorflow/python:session",
         "//tensorflow/python:variables",
+    ],
+)
+
+cuda_py_test(
+    name = "stepper_test",
+    size = "small",
+    srcs = [
+        "stepper_test.py",
+    ],
+    additional_deps = [
+        ":stepper",
+        "//tensorflow:tensorflow_py",
+        "//tensorflow/python:framework",
+        "//tensorflow/python:framework_test_lib",
     ],
 )
 

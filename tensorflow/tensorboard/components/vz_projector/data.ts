@@ -60,7 +60,7 @@ export interface SpriteAndMetadataInfo {
 
 export interface DataPoint extends scatterPlot.DataPoint {
   /** The point in the original space. */
-  vector: number[];
+  vector: Float32Array;
 
   /*
    * Metadata for each point. Each metadata is a set of key/value pairs
@@ -119,7 +119,7 @@ export class DataSet {
   nearestK: number;
   tSNEIteration: number = 0;
   tSNEShouldStop = true;
-  dim = [0, 0];
+  dim: [number, number] = [0, 0];
   hasTSNERun: boolean = false;
   spriteAndMetadataInfo: SpriteAndMetadataInfo;
 
@@ -199,7 +199,7 @@ export class DataSet {
     return accessors;
   }
 
-  hasMeaningfulVisualization(projection: Projection): boolean {
+  projectionCanBeRendered(projection: Projection): boolean {
     if (projection !== 'tsne') {
       return true;
     }
@@ -222,7 +222,6 @@ export class DataSet {
         metadata: dp.metadata,
         index: dp.index,
         vector: dp.vector.slice(),
-        projectedPoint: [0, 0, 0] as [number, number, number],
         projections: {} as {[key: string]: number}
       };
     });
@@ -416,6 +415,9 @@ export class State {
 
   /** The selected projection tab. */
   selectedProjection: Projection;
+
+  /** Dimensions of the DataSet. */
+  dataSetDimensions: [number, number];
 
   /** t-SNE parameters */
   tSNEIteration: number = 0;

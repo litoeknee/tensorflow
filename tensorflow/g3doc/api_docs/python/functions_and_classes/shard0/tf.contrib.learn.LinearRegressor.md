@@ -6,16 +6,13 @@ feature values.
 Example:
 
 ```python
-education = sparse_column_with_hash_bucket(column_name="education",
-                                           hash_bucket_size=1000)
-occupation = sparse_column_with_hash_bucket(column_name="occupation",
-                                            hash_bucket_size=1000)
+sparse_column_a = sparse_column_with_hash_bucket(...)
+sparse_column_b = sparse_column_with_hash_bucket(...)
 
-education_x_occupation = crossed_column(columns=[education, occupation],
-                                        hash_bucket_size=10000)
+sparse_feature_a_x_sparse_feature_b = crossed_column(...)
 
 estimator = LinearRegressor(
-    feature_columns=[occupation, education_x_occupation])
+    feature_columns=[sparse_column_a, sparse_feature_a_x_sparse_feature_b])
 
 # Input builders
 def input_fn_train: # returns x, y
@@ -66,7 +63,7 @@ Construct a `LinearRegressor` estimator object.
 *  <b>`enable_centered_bias`</b>: A bool. If True, estimator will learn a centered
     bias variable for each class. Rest of the model structure learns the
     residual after centered bias.
-*  <b>`label_dimension`</b>: dimension of the label for multilabels.
+*  <b>`label_dimension`</b>: Dimension of the label for multilabels. Defaults to 1.
   _joint_weights: If True use a single (possibly partitioned) variable to
     store the weights. It's faster, but requires all feature columns are
     sparse and have the 'sum' combiner. Incompatible with SDCAOptimizer.
